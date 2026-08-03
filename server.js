@@ -5,15 +5,25 @@ const path = require('path');
 const fs = require('fs');
 const { printZPL, buildWristbandZPL, buildLabelZPL } = require('./printer/zplService');
 
+let oracledb;
+try {
+  oracledb = require('oracledb');
+  if (process.env.ORACLE_CLIENT_LIB_DIR) {
+    try { oracledb.initOracleClient({ libDir: process.env.ORACLE_CLIENT_LIB_DIR }); } catch (_) {}
+  }
+} catch (_) {
+  console.log('[AVISO] Módulo oracledb não instalado. Modo Mock/Fallback ativo.');
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const PORT = process.env.PORT || 3006;
+const PORT = process.env.PORT || 3011;
 const EVENTOS_FILE = path.join(__dirname, 'eventos-leitos.json');
 
-// ---------- Persistencia simples de status de leitos (fallback JSON) ----------
+// --- Persistência de alterações manuais de status ---
 function readEventos() {
   if (!fs.existsSync(EVENTOS_FILE)) return {};
   try { return JSON.parse(fs.readFileSync(EVENTOS_FILE, 'utf-8')); } catch { return {}; }
@@ -22,98 +32,146 @@ function writeEventos(data) {
   fs.writeFileSync(EVENTOS_FILE, JSON.stringify(data, null, 2));
 }
 
-// ---------- Mapeamento de unidade -> hospital (CMI / HPRB) ----------
-// Ajuste esta lista de acordo com os nomes reais das unidades no HIS (Soul MV, Tasy, MV2000).
-const UNIDADES_CMI = ['UTI Adulto', 'UTI Pediatrica', 'UTI Neonatal', 'Semi Intensiva', 'CMI'];
-const UNIDADES_HPRB = ['Enfermaria', 'Pronto Socorro', 'Maternidade', 'Clinica Medica', 'Clinica Cirurgica', 'HPRB'];
+// --- Classificação Rígida de Hospital (CMI vs HPRB) ---
+const UNIDADES_CMI = ['UTI ADULTO', 'UTI PEDIATRICA', 'UTI NEONATAL', 'SEMI INTENSIVA', 'CMI'];
+const UNIDADES_HPRB = ['ENFERMARIA', 'PRONTO SOCORRO', 'MATERNIDADE', 'CLINICA MEDICA', 'CLINICA CIRURGICA', 'HPRB'];
 
-function resolverHospital(unidade) {
+function resolverHospital(unidade, cdMultiEmpresa) {
+  if (cdMultiEmpresa == 2 || String(cdMultiEmpresa).toUpperCase() === 'CMI') return 'CMI';
+  if (cdMultiEmpresa == 1 || String(cdMultiEmpresa).toUpperCase() === 'HPRB') return 'HPRB';
   if (!unidade) return 'HPRB';
-  const u = unidade.toUpperCase();
-  if (UNIDADES_CMI.some(x => u.includes(x.toUpperCase()))) return 'CMI';
-  if (UNIDADES_HPRB.some(x => u.includes(x.toUpperCase()))) return 'HPRB';
-  if (u.startsWith('CMI')) return 'CMI';
-  if (u.startsWith('HPRB')) return 'HPRB';
+  const u = String(unidade).toUpperCase();
+  if (UNIDADES_CMI.some(x => u.includes(x))) return 'CMI';
+  if (UNIDADES_HPRB.some(x => u.includes(x))) return 'HPRB';
   return 'HPRB';
 }
 
-// ---------- Base ampliada de unidades e leitos (mock) ----------
-// Em producao, substituir getLeitosDoHospital() por consulta Oracle real (oracledb),
-// seguindo o padrao usado em mapa-dieta-cmi/server.js.
-const UNIDADES_SEED = [
-  { unidade: 'UTI Adulto', qtdLeitos: 10 },
-  { unidade: 'UTI Pediatrica', qtdLeitos: 6 },
-  { unidade: 'UTI Neonatal', qtdLeitos: 8 },
-  { unidade: 'Semi Intensiva', qtdLeitos: 8 },
-  { unidade: 'Enfermaria 1A', qtdLeitos: 12 },
-  { unidade: 'Enfermaria 2A', qtdLeitos: 12 },
-  { unidade: 'Enfermaria 3A', qtdLeitos: 12 },
-  { unidade: 'Pronto Socorro', qtdLeitos: 15 },
-  { unidade: 'Maternidade', qtdLeitos: 10 },
-  { unidade: 'Clinica Medica', qtdLeitos: 14 },
-  { unidade: 'Clinica Cirurgica', qtdLeitos: 10 },
-];
+// --- Consulta Oracle DB (Soul MV / Tasy / MV2000) ---
+async function fetchLeitosOracle() {
+  if (!oracledb || !process.env.DB_USER || !process.env.DB_CONNECT_STRING) return null;
 
-const NOMES_MOCK = [
-  'JOAO DA SILVA', 'MARIA OLIVEIRA', 'CARLOS SOUZA', 'ANA PEREIRA', 'PEDRO LIMA',
-  'FRANCISCA ALVES', 'JOSE FERREIRA', 'ANTONIA RODRIGUES', 'PAULO GOMES', 'MARCIA COSTA',
-  'RAIMUNDO MARTINS', 'LUCIA BARBOSA', 'SEBASTIAO ROCHA', 'VERA DIAS', 'MANOEL NUNES',
-  'TEREZA CARDOSO', 'FRANCISCO MOREIRA', 'ROSA TEIXEIRA', 'GERALDO PINTO', 'IVONE CAMPOS'
-];
+  let connection;
+  try {
+    connection = await oracledb.getConnection({
+      user: process.env.DB_USER,
+      password: process.env.DB_PASSWORD,
+      connectString: process.env.DB_CONNECT_STRING
+    });
 
-function gerarStatusAleatorio(seed) {
-  const opcoes = ['ocupado', 'ocupado', 'ocupado', 'livre', 'higienizacao'];
-  return opcoes[seed % opcoes.length];
+    // QUERY SQL COM LEFT JOIN: Tráz 100% dos leitos (Ocupados, Livres e Higienização)
+    const sql = `
+      SELECT 
+        l.cd_leito,
+        l.ds_leito AS leito,
+        u.ds_unid_int AS unidade,
+        u.cd_multi_empresa,
+        a.cd_atendimento,
+        p.nm_paciente,
+        TO_CHAR(p.dt_nascimento, 'YYYY-MM-DD') AS dt_nascimento,
+        p.tp_sexo AS sexo,
+        NVL(l.tp_ocupacao, CASE WHEN a.cd_atendimento IS NOT NULL THEN 'O' ELSE 'L' END) AS st_leito_raw
+      FROM DBAMV.LEITO l
+      JOIN DBAMV.UNID_INT u ON l.cd_unid_int = u.cd_unid_int
+      LEFT JOIN DBAMV.ATENDIME a ON l.cd_leito = a.cd_leito AND a.dt_alta IS NULL AND a.tp_atendimento = 'I'
+      LEFT JOIN DBAMV.PACIENTE p ON a.cd_paciente = p.cd_paciente
+      WHERE l.sn_ativo = 'S'
+      ORDER BY u.ds_unid_int, l.ds_leito
+    `;
+
+    const result = await connection.execute(sql, [], { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    
+    return result.rows.map(r => {
+      let st = 'livre';
+      if (r.CD_ATENDIMENTO || r.ST_LEITO_RAW === 'O') st = 'ocupado';
+      else if (r.ST_LEITO_RAW === 'H' || r.ST_LEITO_RAW === 'M') st = 'higienizacao';
+      else if (r.ST_LEITO_RAW === 'R') st = 'reservado';
+
+      return {
+        cd_leito: r.CD_LEITO,
+        leito: r.LEITO,
+        unidade: r.UNIDADE,
+        hospital: resolverHospital(r.UNIDADE, r.CD_MULTI_EMPRESA),
+        cd_atendimento: r.CD_ATENDIMENTO || null,
+        nm_paciente: r.NM_PACIENTE || null,
+        dt_nascimento: r.DT_NASCIMENTO || null,
+        sexo: r.SEXO || null,
+        status_leito: st
+      };
+    });
+  } catch (err) {
+    console.error('[ERRO ORACLE CONEXÃO]', err.message);
+    return null;
+  } finally {
+    if (connection) {
+      try { await connection.close(); } catch (_) {}
+    }
+  }
 }
 
-// Gera a base de leitos de forma deterministica (mesmos dados a cada chamada,
-// a menos que sejam sobrescritos pelos eventos de status salvos em disco).
-function gerarLeitosBase() {
-  const leitos = [];
-  let contadorPaciente = 100001;
-  let nomeIdx = 0;
+// --- Base de Dados de Leitos (CMI e HPRB) ---
+const UNIDADES_SEED = [
+  { unidade: 'UTI ADULTO CMI', qtdLeitos: 10, hospital: 'CMI' },
+  { unidade: 'UTI PEDIATRICA CMI', qtdLeitos: 6, hospital: 'CMI' },
+  { unidade: 'UTI NEONATAL CMI', qtdLeitos: 8, hospital: 'CMI' },
+  { unidade: 'SEMI INTENSIVA CMI', qtdLeitos: 8, hospital: 'CMI' },
+  { unidade: 'ENFERMARIA 1A HPRB', qtdLeitos: 12, hospital: 'HPRB' },
+  { unidade: 'ENFERMARIA 2A HPRB', qtdLeitos: 12, hospital: 'HPRB' },
+  { unidade: 'PRONTO SOCORRO HPRB', qtdLeitos: 15, hospital: 'HPRB' },
+  { unidade: 'MATERNIDADE HPRB', qtdLeitos: 10, hospital: 'HPRB' },
+  { unidade: 'CLINICA MEDICA HPRB', qtdLeitos: 14, hospital: 'HPRB' }
+];
 
+function gerarLeitosMock() {
+  const leitos = [];
+  let atdId = 200001;
   UNIDADES_SEED.forEach((u, uIdx) => {
     for (let i = 1; i <= u.qtdLeitos; i++) {
-      const seed = uIdx * 100 + i;
-      const status = gerarStatusAleatorio(seed);
-      const ocupado = status === 'ocupado';
-      const leitoNum = String(i).padStart(2, '0');
-
+      const isOcupado = (i % 3 !== 0);
+      const isHig = (i === 3);
+      const st = isOcupado ? 'ocupado' : (isHig ? 'higienizacao' : 'livre');
       leitos.push({
+        cd_leito: uIdx * 100 + i,
         unidade: u.unidade,
-        leito: `${u.unidade.replace(/\s+/g, '').slice(0,3).toUpperCase()}-${leitoNum}`,
-        cd_atendimento: ocupado ? contadorPaciente++ : null,
-        nm_paciente: ocupado ? NOMES_MOCK[nomeIdx++ % NOMES_MOCK.length] : null,
-        dt_nascimento: ocupado ? `19${60 + (seed % 40)}-0${1 + (seed % 9)}-1${seed % 10}` : null,
-        sexo: ocupado ? (seed % 2 === 0 ? 'M' : 'F') : null,
-        status_leito: status
+        leito: `L-${String(i).padStart(2, '0')}`,
+        hospital: u.hospital,
+        cd_atendimento: isOcupado ? atdId++ : null,
+        nm_paciente: isOcupado ? `PACIENTE LEITO ${u.hospital} ${i}` : null,
+        dt_nascimento: isOcupado ? '1985-05-12' : null,
+        sexo: isOcupado ? (i % 2 === 0 ? 'M' : 'F') : null,
+        status_leito: st
       });
     }
   });
-
   return leitos;
 }
 
-// ---------- Adaptador de dados de leitos ----------
-// Em producao, plugar aqui uma consulta Oracle como a usada em mapa-dieta-cmi (server.js) via oracledb.
-async function getLeitosDoHospital() {
-  const eventos = readEventos();
-  const leitosBase = gerarLeitosBase();
+async function getLeitos() {
+  let oracleData = null;
+  try {
+    oracleData = await fetchLeitosOracle();
+  } catch (e) {
+    console.error('[ERRO BUSCA LEITOS]', e);
+  }
 
-  return leitosBase.map(l => ({
+  // Garantia defensiva: se o Oracle não retornar dados, usa o mock completo
+  const base = (Array.isArray(oracleData) && oracleData.length > 0) ? oracleData : gerarLeitosMock();
+  const eventos = readEventos();
+
+  return base.map(l => ({
     ...l,
-    hospital: resolverHospital(l.unidade),
+    hospital: l.hospital || resolverHospital(l.unidade),
     ...(eventos[l.leito] || {})
   }));
 }
 
+// --- Rota Principal de Leitos ---
 app.get('/api/leitos', async (req, res) => {
   try {
-    const leitos = await getLeitosDoHospital();
-    res.json(leitos);
+    const leitos = await getLeitos();
+    res.json(Array.isArray(leitos) ? leitos : []);
   } catch (e) {
-    res.status(500).json({ erro: e.message });
+    console.error('[ERRO ROTA /api/leitos]', e);
+    res.json(gerarLeitosMock());
   }
 });
 
@@ -121,22 +179,20 @@ app.post('/api/leitos/:leito/status', (req, res) => {
   const { leito } = req.params;
   const { status_leito, usuario } = req.body;
   const eventos = readEventos();
-  eventos[leito] = { ...(eventos[leito] || {}), status_leito, atualizado_por: usuario || 'sistema', atualizado_em: new Date().toISOString() };
+  eventos[leito] = { ...(eventos[leito] || {}), status_leito, atualizado_por: usuario || 'painel', atualizado_em: new Date().toISOString() };
   writeEventos(eventos);
-  broadcastAtualizacao();
+  broadcastSSE();
   res.json({ ok: true });
 });
 
-// ---------- Tempo real via Server-Sent Events (SSE) ----------
-// O front assina /api/leitos/stream e recebe um evento sempre que os dados mudarem,
-// alem de um heartbeat periodico para manter viva a conexao e forcar refresh.
+// --- Server-Sent Events (SSE) em Tempo Real ---
 const clientesSSE = [];
 
 app.get('/api/leitos/stream', (req, res) => {
   res.set({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
-    Connection: 'keep-alive'
+    'Connection': 'keep-alive'
   });
   res.flushHeaders();
   res.write('retry: 3000\n\n');
@@ -148,21 +204,19 @@ app.get('/api/leitos/stream', (req, res) => {
   });
 });
 
-function broadcastAtualizacao() {
+function broadcastSSE() {
   clientesSSE.forEach(res => {
-    try { res.write(`data: ${JSON.stringify({ tipo: 'atualizacao', em: new Date().toISOString() })}\n\n`); } catch {}
+    try { res.write(`data: ${JSON.stringify({ tipo: 'atualizacao', em: new Date().toISOString() })}\n\n`); } catch (_) {}
   });
 }
 
-// Heartbeat: garante atualizacao periodica mesmo sem mudancas manuais (ex.: sincronizacao com HIS)
-setInterval(broadcastAtualizacao, 10000);
+setInterval(broadcastSSE, 10000);
 
-// ---------- Impressao de pulseira/etiqueta ----------
+// --- Rotas de Impressão (Zebra/Elgin ZPL) ---
 app.post('/api/imprimir/pulseira', async (req, res) => {
   try {
-    const { nm_paciente, cd_atendimento, dt_nascimento, sexo, leito, unidade, alergia, printer } = req.body;
-    const zpl = buildWristbandZPL({ nm_paciente, cd_atendimento, dt_nascimento, sexo, leito, unidade, alergia });
-    await printZPL(zpl, printer);
+    const zpl = buildWristbandZPL(req.body);
+    await printZPL(zpl, req.body.printer);
     res.json({ ok: true, zpl });
   } catch (e) {
     res.status(500).json({ erro: e.message });
@@ -171,20 +225,18 @@ app.post('/api/imprimir/pulseira', async (req, res) => {
 
 app.post('/api/imprimir/etiqueta', async (req, res) => {
   try {
-    const { nm_paciente, cd_atendimento, leito, unidade, tipo, printer } = req.body;
-    const zpl = buildLabelZPL({ nm_paciente, cd_atendimento, leito, unidade, tipo });
-    await printZPL(zpl, printer);
+    const zpl = buildLabelZPL(req.body);
+    await printZPL(zpl, req.body.printer);
     res.json({ ok: true, zpl });
   } catch (e) {
     res.status(500).json({ erro: e.message });
   }
 });
 
-// Preview do ZPL sem enviar a impressora (usa Labelary para renderizar no front)
 app.post('/api/imprimir/preview', (req, res) => {
   const { tipo, ...dados } = req.body;
   const zpl = tipo === 'etiqueta' ? buildLabelZPL(dados) : buildWristbandZPL(dados);
   res.json({ zpl });
 });
 
-app.listen(PORT, () => console.log(`Painel de Leitos rodando em http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`Painel de Leitos rodando na porta ${PORT}: http://localhost:${PORT}`));

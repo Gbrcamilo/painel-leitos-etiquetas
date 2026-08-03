@@ -1,1 +1,465 @@
-<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Painel de Leitos CMI HPRB</title><script src="https://unpkg.com/vue@3/dist/vue.global.js"></script><style>body{font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:16px}header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}main{display:grid;grid-template-columns:260px 1fr;gap:16px}.sidebar{background:#020617;border-radius:10px;padding:12px;border:1px solid #1f2937}.filters select{width:100%;padding:6px;margin-bottom:8px;border-radius:6px;background:#0b1120;color:#e2e8f0;border:1px solid #1f2937}.census-card{background:#0b1120;border-radius:8px;padding:8px;margin-bottom:8px;border:1px solid #1f2937}.census-row{display:flex;justify-content:space-between;font-size:12px;color:#94a3b8}.columns{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px}.card{background:#1e293b;border-radius:10px;padding:12px;margin-bottom:8px;border-left:4px solid #64748b}.card.ocupado{border-color:#ef4444}.card.livre{border-color:#22c55e}.card.higienizacao{border-color:#f59e0b}.leito{font-size:16px;font-weight:700}.unidade{font-size:11px;color:#94a3b8;text-transform:uppercase}.paciente{margin-top:6px;font-weight:600}.paciente.sem{color:#94a3b8;font-style:italic}.info{font-size:11px;color:#94a3b8;margin-top:4px}.btn{padding:6px 10px;border-radius:6px;border:none;background:#2563eb;color:#fff;font-size:11px;cursor:pointer;margin-right:6px;margin-top:8px}.btn.alt{background:#334155}.hospital-badge{font-size:10px;padding:2px 6px;border-radius:999px;border:1px solid #1f2937}.hospital-badge.cmi{color:#3b82f6;border-color:#3b82f6}.hospital-badge.hprb{color:#22c55e;border-color:#22c55e}</style></head><body><div id="app"><header><h1>Painel de Leitos CMI / HPRB</h1><span>{{ filteredLeitos.length }} leitos filtrados</span></header><main><aside class="sidebar"><div class="filters"><label>Hospital</label><select v-model="filtro.hospital"><option value="">Todos</option><option value="CMI">CMI</option><option value="HPRB">HPRB</option></select><label>Unidade</label><select v-model="filtro.unidade"><option value="">Todas</option><option v-for="u in unidades" :key="u" :value="u">{{ u }}</option></select><label>Status</label><select v-model="filtro.status"><option value="">Todos</option><option value="ocupado">Ocupado</option><option value="livre">Livre</option><option value="higienizacao">Higienizacao</option></select></div><h3>Mapa de Censo</h3><div class="census-card"><strong>CMI</strong><div class="census-row"><span>Total</span><span>{{ censo.CMI.total }}</span></div><div class="census-row"><span>Ocupados</span><span>{{ censo.CMI.ocupado }}</span></div><div class="census-row"><span>Livres</span><span>{{ censo.CMI.livre }}</span></div><div class="census-row"><span>Higienizacao</span><span>{{ censo.CMI.higienizacao }}</span></div></div><div class="census-card"><strong>HPRB</strong><div class="census-row"><span>Total</span><span>{{ censo.HPRB.total }}</span></div><div class="census-row"><span>Ocupados</span><span>{{ censo.HPRB.ocupado }}</span></div><div class="census-row"><span>Livres</span><span>{{ censo.HPRB.livre }}</span></div><div class="census-row"><span>Higienizacao</span><span>{{ censo.HPRB.higienizacao }}</span></div></div></aside><section class="columns"><div v-for="hospital in ['CMI','HPRB']" :key="hospital"><h3>{{ hospital }}</h3><div v-for="l in porHospital[hospital]" :key="l.leito" class="card" :class="l.status_leito"><div style="display:flex;justify-content:space-between"><div><div class="unidade">{{ l.unidade }}</div><div class="leito">Leito {{ l.leito }}</div></div><span class="hospital-badge" :class="hospital.toLowerCase()">{{ hospital }}</span></div><div :class="['paciente', !l.nm_paciente ? 'sem' : '']">{{ l.nm_paciente || 'Sem paciente' }}</div><div class="info" v-if="l.cd_atendimento">Atend: {{ l.cd_atendimento }} | Nasc: {{ l.dt_nascimento }} | Sexo: {{ l.sexo }}</div><select v-model="l.status_leito" @change="mudarStatus(l)"><option value="ocupado">Ocupado</option><option value="livre">Livre</option><option value="higienizacao">Higienizacao</option></select><div v-if="l.cd_atendimento"><button class="btn" @click="imprimir(l,'pulseira')">Pulseira</button><button class="btn alt" @click="imprimir(l,'etiqueta')">Etiqueta</button></div></div></div></section></main></div><script>const { createApp } = Vue; createApp({ data(){ return { leitos: [], filtro: { hospital:'', unidade:'', status:'' } }; }, computed: { filteredLeitos(){ return this.leitos.filter(l => (!this.filtro.hospital || l.hospital===this.filtro.hospital) && (!this.filtro.unidade || l.unidade===this.filtro.unidade) && (!this.filtro.status || l.status_leito===this.filtro.status)); }, unidades(){ return [...new Set(this.leitos.map(l=>l.unidade).filter(Boolean))].sort(); }, porHospital(){ return { CMI: this.filteredLeitos.filter(l=>l.hospital==='CMI'), HPRB: this.filteredLeitos.filter(l=>l.hospital==='HPRB') }; }, censo(){ const r = (lista) => ({ total:lista.length, ocupado:lista.filter(l=>l.status_leito==='ocupado').length, livre:lista.filter(l=>l.status_leito==='livre').length, higienizacao:lista.filter(l=>l.status_leito==='higienizacao').length }); return { CMI:r(this.porHospital.CMI), HPRB:r(this.porHospital.HPRB) }; } }, methods: { async carregar(){ const r = await fetch('/api/leitos'); this.leitos = await r.json(); }, async mudarStatus(l){ await fetch('/api/leitos/'+l.leito+'/status', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ status_leito:l.status_leito, usuario:'painel' }) }); }, async imprimir(l, tipo){ const endpoint = tipo==='pulseira' ? '/api/imprimir/pulseira' : '/api/imprimir/etiqueta'; const body = { nm_paciente:l.nm_paciente, cd_atendimento:l.cd_atendimento, dt_nascimento:l.dt_nascimento, sexo:l.sexo, leito:l.leito, unidade:l.unidade, tipo:'GERAL', hospital:l.hospital }; const r = await fetch(endpoint, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) }); const j = await r.json(); alert(j.erro ? 'Erro: '+j.erro : 'Impressao enviada!'); } }, mounted(){ this.carregar(); setInterval(this.carregar, 30000); } }).mount('#app');</script></body></html>
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel de Leitos Hospitalares - CMI & HPRB</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --card-bg: #1e293b;
+      --sidebar-bg: #020617;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --cmi-color: #3b82f6;
+      --hprb-color: #10b981;
+      --status-ocupado: #ef4444;
+      --status-livre: #10b981;
+      --status-hig: #f59e0b;
+    }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; padding: 16px; }
+    header { display: flex; justify-content: space-between; align-items: center; background: #020617; padding: 16px; border-radius: 12px; border: 1px solid #1f2937; margin-bottom: 16px; }
+    .hospital-tabs { display: flex; gap: 8px; }
+    .tab-btn { padding: 8px 18px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: var(--text-muted); cursor: pointer; font-weight: 600; font-size: 14px; transition: all 0.2s; }
+    .tab-btn.active-cmi { background: var(--cmi-color); color: #fff; border-color: var(--cmi-color); }
+    .tab-btn.active-hprb { background: var(--hprb-color); color: #fff; border-color: var(--hprb-color); }
+    .tab-btn.active-todos { background: #6366f1; color: #fff; border-color: #6366f1; }
+    
+    main { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+    .sidebar { background: var(--sidebar-bg); border-radius: 12px; padding: 16px; border: 1px solid #1f2937; height: fit-content; }
+    .filter-group { margin-bottom: 12px; }
+    .filter-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; }
+    .filter-group select { width: 100%; padding: 8px; border-radius: 6px; background: #0b1120; color: #fff; border: 1px solid #334155; }
+    
+    .census-box { background: #0b1120; border-radius: 8px; padding: 12px; margin-top: 12px; border: 1px solid #1f2937; }
+    .census-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+    .census-row.total { font-weight: bold; border-bottom: 1px solid #1f2937; padding-bottom: 6px; }
+    
+    .grid-leitos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .card-leito { background: var(--card-bg); border-radius: 10px; padding: 14px; border-left: 5px solid #64748b; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); position: relative; }
+    .card-leito.ocupado { border-left-color: var(--status-ocupado); }
+    .card-leito.livre { border-left-color: var(--status-livre); }
+    .card-leito.higienizacao { border-left-color: var(--status-hig); }
+    
+    .leito-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+    .leito-num { font-size: 18px; font-weight: 700; }
+    .unidade-tag { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+    .badge-hosp { font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
+    .badge-hosp.CMI { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6; }
+    .badge-hosp.HPRB { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; }
+
+    .paciente-nome { font-weight: 600; font-size: 14px; margin-top: 6px; min-height: 20px; }
+    .paciente-sem { color: var(--text-muted); font-style: italic; font-weight: normal; }
+    .paciente-info { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    
+    .action-bar { display: flex; gap: 6px; margin-top: 12px; }
+    .btn-action { flex: 1; padding: 6px; border-radius: 6px; border: none; font-size: 11px; font-weight: 600; cursor: pointer; background: #2563eb; color: #fff; }
+    .btn-action.alt { background: #334155; }
+    .btn-action:hover { opacity: 0.9; }
+    
+    .select-status { margin-top: 8px; width: 100%; padding: 4px; border-radius: 4px; background: #0f172a; color: #fff; border: 1px solid #334155; font-size: 12px; }
+    .live-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #34d399; }
+    .dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { transform: scale(0.95); opacity: 0.7; } 50% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(0.95); opacity: 0.7; } }
+  </style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>
+      <h1 style="margin:0; font-size: 20px;">Painel de Leitos Hospitalares</h1>
+      <span class="live-indicator"><span class="dot"></span> Tempo Real Ativo (SSE)</span>
+    </div>
+    <div class="hospital-tabs">
+      <button class="tab-btn" :class="{ 'active-cmi': abaHospital === 'CMI' }" @click="abaHospital = 'CMI'">CMI ({{ countCMI }})</button>
+      <button class="tab-btn" :class="{ 'active-hprb': abaHospital === 'HPRB' }" @click="abaHospital = 'HPRB'">HPRB ({{ countHPRB }})</button>
+      <button class="tab-btn" :class="{ 'active-todos': abaHospital === 'TODOS' }" @click="abaHospital = 'TODOS'">TODOS ({{ leitos.length }})</button>
+    </div>
+  </header>
+
+  <main>
+    <aside class="sidebar">
+      <h3>Filtros de Exibição</h3>
+      <div class="filter-group">
+        <label>Unidade / Setor</label>
+        <select v-model="filtroUnidade">
+          <option value="">Todas as Unidades</option>
+          <option v-for="u in listaUnidades" :key="u" :value="u">{{ u }}</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Status do Leito</label>
+        <select v-model="filtroStatus">
+          <option value="">Todos os Status</option>
+          <option value="ocupado">Ocupado</option>
+          <option value="livre">Livre</option>
+          <option value="higienizacao">Higienização</option>
+        </select>
+      </div>
+
+      <h3>Censo Hospitalar</h3>
+      <div class="census-box">
+        <div class="census-row total"><span>Total de Leitos</span><span>{{ censo.total }}</span></div>
+        <div class="census-row"><span>Ocupados</span><span style="color:var(--status-ocupado)">{{ censo.ocupados }}</span></div>
+        <div class="census-row"><span>Livres</span><span style="color:var(--status-livre)">{{ censo.livres }}</span></div>
+        <div class="census-row"><span>Higienização</span><span style="color:var(--status-hig)">{{ censo.higienizacao }}</span></div>
+        <div class="census-row" style="margin-top:8px; font-weight:bold;"><span>Taxa de Ocupação</span><span>{{ censo.taxa }}%</span></div>
+      </div>
+    </aside>
+
+    <section class="grid-leitos">
+      <div v-for="l in leitosFiltrados" :key="l.leito" class="card-leito" :class="l.status_leito">
+        <div class="leito-header">
+          <div>
+            <div class="unidade-tag">{{ l.unidade }}</div>
+            <div class="leito-num">{{ l.leito }}</div>
+          </div>
+          <span class="badge-hosp" :class="l.hospital">{{ l.hospital }}</span>
+        </div>
+
+        <div class="paciente-nome" :class="{ 'paciente-sem': !l.nm_paciente }">
+          {{ l.nm_paciente || 'Leito Vago' }}
+        </div>
+        
+        <div class="paciente-info" v-if="l.cd_atendimento">
+          Atd: {{ l.cd_atendimento }} | Nasc: {{ l.dt_nascimento }} | Sexo: {{ l.sexo }}
+        </div>
+
+        <select class="select-status" v-model="l.status_leito" @change="mudarStatus(l)">
+          <option value="ocupado">Ocupado</option>
+          <option value="livre">Livre</option>
+          <option value="higienizacao">Higienização</option>
+        </select>
+
+        <div class="action-bar" v-if="l.cd_atendimento">
+          <button class="btn-action" @click="imprimir(l, 'pulseira')">Pulseira</button>
+          <button class="btn-action alt" @click="imprimir(l, 'etiqueta')">Etiqueta</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const { createApp } = Vue;
+createApp({
+  data() {
+    return {
+      leitos: [],
+      abaHospital: 'CMI',
+      filtroUnidade: '',
+      filtroStatus: ''
+    };
+  },
+  computed: {
+    countCMI() { return this.leitos.filter(l => l.hospital === 'CMI').length; },
+    countHPRB() { return this.leitos.filter(l => l.hospital === 'HPRB').length; },
+    leitosPorAba() {
+      if (this.abaHospital === 'TODOS') return this.leitos;
+      return this.leitos.filter(l => l.hospital === this.abaHospital);
+    },
+    listaUnidades() {
+      return [...new Set(this.leitosPorAba.map(l => l.unidade).filter(Boolean))].sort();
+    },
+    leitosFiltrados() {
+      return this.leitosPorAba.filter(l => {
+        const mUnid = !this.filtroUnidade || l.unidade === this.filtroUnidade;
+        const mStat = !this.filtroStatus || l.status_leito === this.filtroStatus;
+        return mUnid && mStat;
+      });
+    },
+    censo() {
+      const base = this.leitosPorAba;
+      const total = base.length;
+      const ocupados = base.filter(l => l.status_leito === 'ocupado').length;
+      const livres = base.filter(l => l.status_leito === 'livre').length;
+      const higienizacao = base.filter(l => l.status_leito === 'higienizacao').length;
+      const taxa = total > 0 ? ((ocupados / total) * 100).toFixed(1) : 0;
+      return { total, ocupados, livres, higienizacao, taxa };
+    }
+  },
+  methods: {
+    async carregar() {
+      try {
+        const r = await fetch('/api/leitos');
+        const data = await r.json();
+        if (Array.isArray(data)) {
+          this.leitos = data;
+        }
+      } catch (err) {
+        console.error('Erro ao carregar leitos:', err);
+      }
+    },
+    async mudarStatus(l) {
+      await fetch(`/api/leitos/${encodeURIComponent(l.leito)}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status_leito: l.status_leito, usuario: 'painel' })
+      });
+    },
+    async imprimir(l, tipo) {
+      const endpoint = tipo === 'pulseira' ? '/api/imprimir/pulseira' : '/api/imprimir/etiqueta';
+      const body = {
+        nm_paciente: l.nm_paciente,
+        cd_atendimento: l.cd_atendimento,
+        dt_nascimento: l.dt_nascimento,
+        sexo: l.sexo,
+        leito: l.leito,
+        unidade: l.unidade,
+        hospital: l.hospital
+      };
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const j = await r.json();
+      alert(j.erro ? 'Erro de Impressão: ' + j.erro : 'Solicitação de impressão enviada com sucesso!');
+    },
+    iniciarSSE() {
+      const evtSource = new EventSource('/api/leitos/stream');
+      evtSource.onmessage = () => this.carregar();
+      evtSource.onerror = () => setTimeout(() => this.iniciarSSE(), 5000);
+    }
+  },
+  mounted() {
+    this.carregar();
+    this.iniciarSSE();
+  }
+}).mount('#app');
+</script>
+</body>
+</html><!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Painel de Leitos Hospitalares - CMI & HPRB</title>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --card-bg: #1e293b;
+      --sidebar-bg: #020617;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --cmi-color: #3b82f6;
+      --hprb-color: #10b981;
+      --status-ocupado: #ef4444;
+      --status-livre: #10b981;
+      --status-hig: #f59e0b;
+    }
+    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; padding: 16px; }
+    header { display: flex; justify-content: space-between; align-items: center; background: #020617; padding: 16px; border-radius: 12px; border: 1px solid #1f2937; margin-bottom: 16px; }
+    .hospital-tabs { display: flex; gap: 8px; }
+    .tab-btn { padding: 8px 18px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: var(--text-muted); cursor: pointer; font-weight: 600; font-size: 14px; transition: all 0.2s; }
+    .tab-btn.active-cmi { background: var(--cmi-color); color: #fff; border-color: var(--cmi-color); }
+    .tab-btn.active-hprb { background: var(--hprb-color); color: #fff; border-color: var(--hprb-color); }
+    .tab-btn.active-todos { background: #6366f1; color: #fff; border-color: #6366f1; }
+    
+    main { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+    .sidebar { background: var(--sidebar-bg); border-radius: 12px; padding: 16px; border: 1px solid #1f2937; height: fit-content; }
+    .filter-group { margin-bottom: 12px; }
+    .filter-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; }
+    .filter-group select { width: 100%; padding: 8px; border-radius: 6px; background: #0b1120; color: #fff; border: 1px solid #334155; }
+    
+    .census-box { background: #0b1120; border-radius: 8px; padding: 12px; margin-top: 12px; border: 1px solid #1f2937; }
+    .census-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
+    .census-row.total { font-weight: bold; border-bottom: 1px solid #1f2937; padding-bottom: 6px; }
+    
+    .grid-leitos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .card-leito { background: var(--card-bg); border-radius: 10px; padding: 14px; border-left: 5px solid #64748b; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); position: relative; }
+    .card-leito.ocupado { border-left-color: var(--status-ocupado); }
+    .card-leito.livre { border-left-color: var(--status-livre); }
+    .card-leito.higienizacao { border-left-color: var(--status-hig); }
+    
+    .leito-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+    .leito-num { font-size: 18px; font-weight: 700; }
+    .unidade-tag { font-size: 11px; color: var(--text-muted); text-transform: uppercase; }
+    .badge-hosp { font-size: 10px; padding: 2px 6px; border-radius: 10px; font-weight: bold; }
+    .badge-hosp.CMI { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid #3b82f6; }
+    .badge-hosp.HPRB { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid #10b981; }
+
+    .paciente-nome { font-weight: 600; font-size: 14px; margin-top: 6px; min-height: 20px; }
+    .paciente-sem { color: var(--text-muted); font-style: italic; font-weight: normal; }
+    .paciente-info { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    
+    .action-bar { display: flex; gap: 6px; margin-top: 12px; }
+    .btn-action { flex: 1; padding: 6px; border-radius: 6px; border: none; font-size: 11px; font-weight: 600; cursor: pointer; background: #2563eb; color: #fff; }
+    .btn-action.alt { background: #334155; }
+    .btn-action:hover { opacity: 0.9; }
+    
+    .select-status { margin-top: 8px; width: 100%; padding: 4px; border-radius: 4px; background: #0f172a; color: #fff; border: 1px solid #334155; font-size: 12px; }
+    .live-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #34d399; }
+    .dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0% { transform: scale(0.95); opacity: 0.7; } 50% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(0.95); opacity: 0.7; } }
+  </style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div>
+      <h1 style="margin:0; font-size: 20px;">Painel de Leitos Hospitalares</h1>
+      <span class="live-indicator"><span class="dot"></span> Tempo Real Ativo (SSE)</span>
+    </div>
+    <div class="hospital-tabs">
+      <button class="tab-btn" :class="{ 'active-cmi': abaHospital === 'CMI' }" @click="abaHospital = 'CMI'">CMI ({{ countCMI }})</button>
+      <button class="tab-btn" :class="{ 'active-hprb': abaHospital === 'HPRB' }" @click="abaHospital = 'HPRB'">HPRB ({{ countHPRB }})</button>
+      <button class="tab-btn" :class="{ 'active-todos': abaHospital === 'TODOS' }" @click="abaHospital = 'TODOS'">TODOS ({{ leitos.length }})</button>
+    </div>
+  </header>
+
+  <main>
+    <aside class="sidebar">
+      <h3>Filtros de Exibição</h3>
+      <div class="filter-group">
+        <label>Unidade / Setor</label>
+        <select v-model="filtroUnidade">
+          <option value="">Todas as Unidades</option>
+          <option v-for="u in listaUnidades" :key="u" :value="u">{{ u }}</option>
+        </select>
+      </div>
+      <div class="filter-group">
+        <label>Status do Leito</label>
+        <select v-model="filtroStatus">
+          <option value="">Todos os Status</option>
+          <option value="ocupado">Ocupado</option>
+          <option value="livre">Livre</option>
+          <option value="higienizacao">Higienização</option>
+        </select>
+      </div>
+
+      <h3>Censo Hospitalar</h3>
+      <div class="census-box">
+        <div class="census-row total"><span>Total de Leitos</span><span>{{ censo.total }}</span></div>
+        <div class="census-row"><span>Ocupados</span><span style="color:var(--status-ocupado)">{{ censo.ocupados }}</span></div>
+        <div class="census-row"><span>Livres</span><span style="color:var(--status-livre)">{{ censo.livres }}</span></div>
+        <div class="census-row"><span>Higienização</span><span style="color:var(--status-hig)">{{ censo.higienizacao }}</span></div>
+        <div class="census-row" style="margin-top:8px; font-weight:bold;"><span>Taxa de Ocupação</span><span>{{ censo.taxa }}%</span></div>
+      </div>
+    </aside>
+
+    <section class="grid-leitos">
+      <div v-for="l in leitosFiltrados" :key="l.leito" class="card-leito" :class="l.status_leito">
+        <div class="leito-header">
+          <div>
+            <div class="unidade-tag">{{ l.unidade }}</div>
+            <div class="leito-num">{{ l.leito }}</div>
+          </div>
+          <span class="badge-hosp" :class="l.hospital">{{ l.hospital }}</span>
+        </div>
+
+        <div class="paciente-nome" :class="{ 'paciente-sem': !l.nm_paciente }">
+          {{ l.nm_paciente || 'Leito Vago' }}
+        </div>
+        
+        <div class="paciente-info" v-if="l.cd_atendimento">
+          Atd: {{ l.cd_atendimento }} | Nasc: {{ l.dt_nascimento }} | Sexo: {{ l.sexo }}
+        </div>
+
+        <select class="select-status" v-model="l.status_leito" @change="mudarStatus(l)">
+          <option value="ocupado">Ocupado</option>
+          <option value="livre">Livre</option>
+          <option value="higienizacao">Higienização</option>
+        </select>
+
+        <div class="action-bar" v-if="l.cd_atendimento">
+          <button class="btn-action" @click="imprimir(l, 'pulseira')">Pulseira</button>
+          <button class="btn-action alt" @click="imprimir(l, 'etiqueta')">Etiqueta</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script>
+const { createApp } = Vue;
+createApp({
+  data() {
+    return {
+      leitos: [],
+      abaHospital: 'CMI',
+      filtroUnidade: '',
+      filtroStatus: ''
+    };
+  },
+  computed: {
+    countCMI() { return this.leitos.filter(l => l.hospital === 'CMI').length; },
+    countHPRB() { return this.leitos.filter(l => l.hospital === 'HPRB').length; },
+    leitosPorAba() {
+      if (this.abaHospital === 'TODOS') return this.leitos;
+      return this.leitos.filter(l => l.hospital === this.abaHospital);
+    },
+    listaUnidades() {
+      return [...new Set(this.leitosPorAba.map(l => l.unidade).filter(Boolean))].sort();
+    },
+    leitosFiltrados() {
+      return this.leitosPorAba.filter(l => {
+        const mUnid = !this.filtroUnidade || l.unidade === this.filtroUnidade;
+        const mStat = !this.filtroStatus || l.status_leito === this.filtroStatus;
+        return mUnid && mStat;
+      });
+    },
+    censo() {
+      const base = this.leitosPorAba;
+      const total = base.length;
+      const ocupados = base.filter(l => l.status_leito === 'ocupado').length;
+      const livres = base.filter(l => l.status_leito === 'livre').length;
+      const higienizacao = base.filter(l => l.status_leito === 'higienizacao').length;
+      const taxa = total > 0 ? ((ocupados / total) * 100).toFixed(1) : 0;
+      return { total, ocupados, livres, higienizacao, taxa };
+    }
+  },
+  methods: {
+    async carregar() {
+      try {
+        const r = await fetch('/api/leitos');
+        const data = await r.json();
+        if (Array.isArray(data)) {
+          this.leitos = data;
+        }
+      } catch (err) {
+        console.error('Erro ao carregar leitos:', err);
+      }
+    },
+    async mudarStatus(l) {
+      await fetch(`/api/leitos/${encodeURIComponent(l.leito)}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status_leito: l.status_leito, usuario: 'painel' })
+      });
+    },
+    async imprimir(l, tipo) {
+      const endpoint = tipo === 'pulseira' ? '/api/imprimir/pulseira' : '/api/imprimir/etiqueta';
+      const body = {
+        nm_paciente: l.nm_paciente,
+        cd_atendimento: l.cd_atendimento,
+        dt_nascimento: l.dt_nascimento,
+        sexo: l.sexo,
+        leito: l.leito,
+        unidade: l.unidade,
+        hospital: l.hospital
+      };
+      const r = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const j = await r.json();
+      alert(j.erro ? 'Erro de Impressão: ' + j.erro : 'Solicitação de impressão enviada com sucesso!');
+    },
+    iniciarSSE() {
+      const evtSource = new EventSource('/api/leitos/stream');
+      evtSource.onmessage = () => this.carregar();
+      evtSource.onerror = () => setTimeout(() => this.iniciarSSE(), 5000);
+    }
+  },
+  mounted() {
+    this.carregar();
+    this.iniciarSSE();
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
