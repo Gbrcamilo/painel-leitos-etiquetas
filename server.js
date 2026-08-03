@@ -25,7 +25,7 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-const PORT = process.env.PORT || 3011;
+const PORT = 3011;
 const EVENTOS_FILE = path.join(__dirname, 'eventos-leitos.json');
 
 function readEventos() {
