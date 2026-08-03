@@ -81,6 +81,14 @@
     .dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0% { transform: scale(0.95); opacity: 0.7; } 50% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(0.95); opacity: 0.7; } }
 
+    /* Banner de erro de banco */
+    .db-error { background: #7f1d1d; border: 1px solid #ef4444; color: #fca5a5; padding: 14px 18px; border-radius: 10px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; font-size: 13px; }
+    .db-error strong { color: #fef2f2; }
+    /* Loading spinner */
+    .loading-msg { text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 15px; }
+    /* Estado vazio */
+    .empty-msg { text-align: center; padding: 60px 20px; color: var(--text-muted); }
+
     /* Modal de Configuração */
     .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 999; }
     .modal-box { background: #1e293b; padding: 20px; border-radius: 12px; width: 420px; border: 1px solid #334155; }
@@ -91,6 +99,16 @@
 </head>
 <body>
 <div id="app">
+
+  <!-- Banner de erro de conexão Oracle -->
+  <div v-if="erroDb" class="db-error">
+    <span style="font-size:22px;">⚠️</span>
+    <div>
+      <strong>Falha na conexão com o banco de dados Oracle (Soul MV)</strong><br>
+      <span>{{ erroDb }}</span>
+    </div>
+  </div>
+
   <header>
     <div>
       <h1 style="margin:0; font-size: 20px;">Painel de Leitos Hospitalares</h1>
@@ -234,6 +252,8 @@ createApp({
     return {
       leitos: [],
       historico: [],
+      erroDb: null,
+      carregando: false,
       abaHospital: 'CMI',
       buscaTexto: '',
       filtroUnidade: '',
@@ -283,39 +303,49 @@ createApp({
       return { total, ocupados, livres, higienizacao, taxa };
     },
     async carregar() {
+      this.carregando = true;
       try {
-        const r = await fetch('/api/leitos');
+        const r    = await fetch('/api/leitos');
         const data = await r.json();
-        if (data && Array.isArray(data.leitos)) {
-          this.leitos = data.leitos;
+        if (data.erro) {
+          this.erroDb = data.erro;
+          this.leitos = [];
+        } else {
+          this.erroDb   = null;
+          this.leitos   = data.leitos   || [];
           this.historico = data.historico || [];
         }
       } catch (err) {
-        console.error('Erro ao carregar leitos:', err);
+        this.erroDb = 'Sem resposta do servidor Node.js. Verifique se npm start está rodando.';
+        console.error('[carregar]', err);
+      } finally {
+        this.carregando = false;
       }
     },
     async solicitarMudancaStatus(l, novoStatus) {
       const statusAnterior = l.status_leito;
       if (statusAnterior === novoStatus) return;
 
-      const usuario = prompt(`Alteração no Leito ${l.leito} (${statusAnterior.toUpperCase()} ➔ ${novoStatus.toUpperCase()}):\n\nDigite seu NOME ou MATRÍCULA para registrar no histórico:`);
-      
+      const usuario = prompt(`Alteração no Leito ${l.leito}\n${statusAnterior.toUpperCase()} ➔ ${novoStatus.toUpperCase()}\n\nInforme seu NOME ou MATRÍCULA:`);
+
       if (!usuario || !usuario.trim()) {
-        alert('Alteração cancelada! É obrigatório informar o nome do responsável.');
+        alert('Alteração cancelada. O nome do responsável é obrigatório.');
         this.carregar();
         return;
       }
 
-      await fetch(`/api/leitos/${encodeURIComponent(l.leito)}/status`, {
+      const resp = await fetch(`/api/leitos/${encodeURIComponent(l.leito)}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          status_leito: novoStatus,
+          cd_leito:        l.cd_leito,
+          status_leito:    novoStatus,
           status_anterior: statusAnterior,
-          usuario: usuario.trim()
+          usuario:         usuario.trim()
         })
       });
-
+      const json = await resp.json();
+      if (json.erro) alert('Erro: ' + json.erro);
       this.carregar();
     },
     async imprimir(l, tipo) {
