@@ -22,6 +22,22 @@ function writeEventos(data) {
   fs.writeFileSync(EVENTOS_FILE, JSON.stringify(data, null, 2));
 }
 
+// ---------- Mapeamento de unidade -> hospital (CMI / HPRB) ----------
+// Ajuste esta lista de acordo com os nomes reais das unidades no HIS (Soul MV, Tasy, MV2000).
+const UNIDADES_CMI = ['UTI Adulto', 'UTI Pediatrica', 'UTI Neonatal', 'CMI'];
+const UNIDADES_HPRB = ['Enfermaria 3A', 'Enfermaria 3B', 'Pronto Socorro', 'HPRB'];
+
+function resolverHospital(unidade) {
+  if (!unidade) return 'HPRB';
+  const u = unidade.toUpperCase();
+  if (UNIDADES_CMI.some(x => u.includes(x.toUpperCase()))) return 'CMI';
+  if (UNIDADES_HPRB.some(x => u.includes(x.toUpperCase()))) return 'HPRB';
+  // fallback: se o nome da unidade comecar com CMI ou HPRB
+  if (u.startsWith('CMI')) return 'CMI';
+  if (u.startsWith('HPRB')) return 'HPRB';
+  return 'HPRB';
+}
+
 // ---------- Mock/adaptador de dados de leitos (substituir por consulta Oracle no HIS) ----------
 // Em producao, plugar aqui uma consulta como a usada em mapa-dieta-cmi (server.js) via oracledb.
 async function getLeitosDoHospital() {
@@ -33,7 +49,11 @@ async function getLeitosDoHospital() {
     { unidade: 'Enfermaria 3A', leito: '301', cd_atendimento: 100235, nm_paciente: 'MARIA OLIVEIRA', dt_nascimento: '1975-02-20', sexo: 'F', status_leito: 'ocupado' },
     { unidade: 'Enfermaria 3A', leito: '302', cd_atendimento: null, nm_paciente: null, status_leito: 'higienizacao' },
   ];
-  return leitosBase.map(l => ({ ...l, ...(eventos[l.leito] || {}) }));
+  return leitosBase.map(l => ({
+    ...l,
+    hospital: resolverHospital(l.unidade),
+    ...(eventos[l.leito] || {})
+  }));
 }
 
 app.get('/api/leitos', async (req, res) => {
