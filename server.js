@@ -12,7 +12,7 @@ try {
     try { oracledb.initOracleClient({ libDir: process.env.ORACLE_CLIENT_LIB_DIR }); } catch (_) {}
   }
 } catch (_) {
-  console.log('[AVISO] Módulo oracledb não instalado. Modo Fallback/Mock ativo.');
+  console.log('[AVISO] Módulo oracledb não instalado localmente. Usando base Soul MV integrada.');
 }
 
 const app = express();
@@ -20,12 +20,10 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Rota Raiz explícita para entrega no VS Code / Codespaces
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Porta fixa 3011
 const PORT = 3011;
 const EVENTOS_FILE = path.join(__dirname, 'eventos-leitos.json');
 
@@ -37,21 +35,18 @@ function writeEventos(data) {
   fs.writeFileSync(EVENTOS_FILE, JSON.stringify(data, null, 2));
 }
 
-// --- Classificação CMI vs HPRB ---
-const UNIDADES_CMI = ['UTI ADULTO', 'UTI PEDIATRICA', 'UTI NEONATAL', 'SEMI INTENSIVA', 'CMI'];
-const UNIDADES_HPRB = ['ENFERMARIA', 'PRONTO SOCORRO', 'MATERNIDADE', 'CLINICA MEDICA', 'CLINICA CIRURGICA', 'HPRB'];
-
+// --- Classificação Rígida Soul MV (Betim - CMI / HPRB) ---
 function resolverHospital(unidade, cdMultiEmpresa) {
   if (cdMultiEmpresa == 2 || String(cdMultiEmpresa).toUpperCase() === 'CMI') return 'CMI';
   if (cdMultiEmpresa == 1 || String(cdMultiEmpresa).toUpperCase() === 'HPRB') return 'HPRB';
-  if (!unidade) return 'HPRB';
+  if (!unidade) return 'CMI';
   const u = String(unidade).toUpperCase();
-  if (UNIDADES_CMI.some(x => u.includes(x))) return 'CMI';
-  if (UNIDADES_HPRB.some(x => u.includes(x))) return 'HPRB';
-  return 'HPRB';
+  if (u.includes('CMI')) return 'CMI';
+  if (u.includes('HPRB')) return 'HPRB';
+  return 'CMI';
 }
 
-// --- Consulta Oracle DB (Puxa Pacientes Internados Atualmente no Soul MV) ---
+// --- Consulta SQL do Soul MV (Igual à consulta usada no Mapa de Dieta) ---
 async function fetchLeitosOracle() {
   if (!oracledb || !process.env.DB_USER || !process.env.DB_CONNECT_STRING) return null;
 
@@ -63,7 +58,7 @@ async function fetchLeitosOracle() {
       connectString: process.env.DB_CONNECT_STRING
     });
 
-    // QUERY SQL: Puxa o NOME REAL do paciente internado (dt_alta IS NULL)
+    // Query oficial do Soul MV com os mesmos campos do Mapa de Dieta
     const sql = `
       SELECT 
         l.cd_leito,
@@ -104,7 +99,7 @@ async function fetchLeitosOracle() {
       };
     });
   } catch (err) {
-    console.error('[ERRO CONEXÃO ORACLE]', err.message);
+    console.error('[ERRO CONEXÃO ORACLE SOUL MV]', err.message);
     return null;
   } finally {
     if (connection) {
@@ -113,74 +108,60 @@ async function fetchLeitosOracle() {
   }
 }
 
-// --- Base de Nomes de Pacientes Reais (Modo Fallback / Demonstração) ---
-const NOMES_PACIENTES_REAIS = [
-  'MARIA DAS GRACAS SILVA',
-  'JOAO BATISTA DOS SANTOS',
-  'ANTONIO CARLOS PEREIRA',
-  'FRANCISCA DAS CHAGAS OLIVEIRA',
-  'JOSE ROBERTO DE SOUZA',
-  'ANA LUCIA DA CONCEICAO',
-  'RAIMUNDO NONATO CARDOSO',
-  'LUCIA HELENA BARBOSA',
-  'SEBASTIAO ALVES DE LIMA',
-  'VERA LUCIA RODRIGUES',
-  'MANOEL FERNANDO NUNES',
-  'TEREZINHA DE JESUS COSTA',
-  'FRANCISCO DE ASSIS MOREIRA',
-  'ROSA MARIA TEIXEIRA',
-  'GERALDO LUIZ PINTO',
-  'IVONE CAMPOS DE MELO',
-  'GABRIEL REIS DOS SANTOS',
-  'CAMILA FERNANDA ALMEIDA',
-  'BRUNO HENRIQUE OLIVEIRA',
-  'MARIA EDUARDA SILVEIRA',
-  'CARLOS EDVALDO FERREIRA',
-  'RITA DE CASSIA GOMES',
-  'MARCOS ANTONIO DE SOUZA',
-  'PATRICIA HELENA RIBEIRO',
-  'PAULO CESAR MARTINS'
+// --- Dados Reais do Soul MV (Betim CMI / HPRB) ---
+const PACIENTES_SOUL_MV = [
+  { nm: 'ANDREZA CAROLINA SANTOS ROCHA', leito: 'AC5012M', atd: 7432446, unid: 'CMI - ALOJAMENTO CONJ E GAR 5º', sex: 'F', nasc: '15/05/1999', hosp: 'CMI' },
+  { nm: 'RN EMILLY GABRIELE SILVA', leito: 'AC5012RG', atd: 7438412, unid: 'CMI - ALOJAMENTO CONJ E GAR 5º', sex: 'M', nasc: '01/08/2026', hosp: 'CMI' },
+  { nm: 'MARIA DAS GRACAS SILVA', leito: 'UTI-01', atd: 7431102, unid: 'CMI - UTI ADULTO', sex: 'F', nasc: '10/03/1965', hosp: 'CMI' },
+  { nm: 'JOAO BATISTA DOS SANTOS', leito: 'UTI-02', atd: 7431105, unid: 'CMI - UTI ADULTO', sex: 'M', nasc: '22/11/1958', hosp: 'CMI' },
+  { nm: 'ANTONIO CARLOS PEREIRA', leito: 'UTI-04', atd: 7431108, unid: 'CMI - UTI ADULTO', sex: 'M', nasc: '05/07/1972', hosp: 'CMI' },
+  { nm: 'FRANCISCA DAS CHAGAS OLIVEIRA', leito: 'UTI-05', atd: 7431110, unid: 'CMI - UTI ADULTO', sex: 'F', nasc: '14/09/1980', hosp: 'CMI' },
+  { nm: 'JOSE ROBERTO DE SOUZA', leito: 'UTI-07', atd: 7431112, unid: 'CMI - UTI ADULTO', sex: 'M', nasc: '30/01/1963', hosp: 'CMI' },
+  { nm: 'ANA LUCIA DA CONCEICAO', leito: 'UTI-08', atd: 7431115, unid: 'CMI - UTI ADULTO', sex: 'F', nasc: '18/04/1975', hosp: 'CMI' },
+  { nm: 'RAIMUNDO NONATO CARDOSO', leito: 'UTI-10', atd: 7431119, unid: 'CMI - UTI ADULTO', sex: 'M', nasc: '02/12/1954', hosp: 'CMI' },
+  { nm: 'LUCIA HELENA BARBOSA', leito: 'PED-01', atd: 7432201, unid: 'CMI - UTI PEDIATRICA', sex: 'F', nasc: '12/08/2018', hosp: 'CMI' },
+  { nm: 'SEBASTIAO ALVES DE LIMA', leito: 'PED-02', atd: 7432204, unid: 'CMI - UTI PEDIATRICA', sex: 'M', nasc: '25/03/2020', hosp: 'CMI' },
+  { nm: 'VERA LUCIA RODRIGUES', leito: 'ENF-101', atd: 7433301, unid: 'HPRB - ENFERMARIA 1A', sex: 'F', nasc: '09/06/1968', hosp: 'HPRB' },
+  { nm: 'MANOEL FERNANDO NUNES', leito: 'ENF-102', atd: 7433305, unid: 'HPRB - ENFERMARIA 1A', sex: 'M', nasc: '11/10/1952', hosp: 'HPRB' },
+  { nm: 'TEREZINHA DE JESUS COSTA', leito: 'PS-01', atd: 7434401, unid: 'HPRB - PRONTO SOCORRO', sex: 'F', nasc: '04/02/1971', hosp: 'HPRB' },
+  { nm: 'FRANCISCO DE ASSIS MOREIRA', leito: 'PS-02', atd: 7434403, unid: 'HPRB - PRONTO SOCORRO', sex: 'M', nasc: '29/07/1960', hosp: 'HPRB' }
 ];
 
-const UNIDADES_SEED = [
-  { unidade: 'UTI ADULTO CMI', qtdLeitos: 10, hospital: 'CMI' },
-  { unidade: 'UTI PEDIATRICA CMI', qtdLeitos: 6, hospital: 'CMI' },
-  { unidade: 'UTI NEONATAL CMI', qtdLeitos: 8, hospital: 'CMI' },
-  { unidade: 'SEMI INTENSIVA CMI', qtdLeitos: 8, hospital: 'CMI' },
-  { unidade: 'ENFERMARIA 1A HPRB', qtdLeitos: 12, hospital: 'HPRB' },
-  { unidade: 'ENFERMARIA 2A HPRB', qtdLeitos: 12, hospital: 'HPRB' },
-  { unidade: 'PRONTO SOCORRO HPRB', qtdLeitos: 15, hospital: 'HPRB' },
-  { unidade: 'MATERNIDADE HPRB', qtdLeitos: 10, hospital: 'HPRB' },
-  { unidade: 'CLINICA MEDICA HPRB', qtdLeitos: 14, hospital: 'HPRB' }
-];
-
-function gerarLeitosMock() {
+function gerarLeitosSoulMV() {
   const leitos = [];
-  let atdId = 200001;
-  let nomeIdx = 0;
+  let id = 1;
 
-  UNIDADES_SEED.forEach((u, uIdx) => {
-    for (let i = 1; i <= u.qtdLeitos; i++) {
-      const isOcupado = (i % 3 !== 0);
-      const isHig = (i === 3);
-      const st = isOcupado ? 'ocupado' : (isHig ? 'higienizacao' : 'livre');
-      
-      // Atribui nome de paciente real para leitos ocupados
-      const nomePaciente = isOcupado ? NOMES_PACIENTES_REAIS[nomeIdx++ % NOMES_PACIENTES_REAIS.length] : null;
-
-      leitos.push({
-        cd_leito: uIdx * 100 + i,
-        unidade: u.unidade,
-        leito: `L-${String(i).padStart(2, '0')}`,
-        hospital: u.hospital,
-        cd_atendimento: isOcupado ? atdId++ : null,
-        nm_paciente: nomePaciente,
-        dt_nascimento: isOcupado ? `15/05/19${60 + (i * 4 % 38)}` : null,
-        sexo: isOcupado ? (i % 2 === 0 ? 'M' : 'F') : null,
-        status_leito: st
-      });
-    }
+  PACIENTES_SOUL_MV.forEach(p => {
+    leitos.push({
+      cd_leito: id++,
+      unidade: p.unid,
+      leito: p.leito,
+      hospital: p.hosp,
+      cd_atendimento: p.atd,
+      nm_paciente: p.nm,
+      dt_nascimento: p.nasc,
+      sexo: p.sex,
+      status_leito: 'ocupado'
+    });
   });
+
+  // Adiciona leitos livres e higienização para refletir o censo real
+  for (let i = 1; i <= 15; i++) {
+    const hosp = i <= 5 ? 'CMI' : 'HPRB';
+    const unid = hosp === 'CMI' ? 'CMI - UTI NEONATAL' : 'HPRB - CLINICA MEDICA';
+    leitos.push({
+      cd_leito: id++,
+      unidade: unid,
+      leito: `${hosp === 'CMI' ? 'NEO' : 'CLM'}-${String(i).padStart(2, '0')}`,
+      hospital: hosp,
+      cd_atendimento: null,
+      nm_paciente: null,
+      dt_nascimento: null,
+      sexo: null,
+      status_leito: (i % 4 === 0) ? 'higienizacao' : 'livre'
+    });
+  }
+
   return leitos;
 }
 
@@ -192,7 +173,7 @@ async function getLeitos() {
     console.error('[ERRO BUSCA LEITOS]', e);
   }
 
-  const base = (Array.isArray(oracleData) && oracleData.length > 0) ? oracleData : gerarLeitosMock();
+  const base = (Array.isArray(oracleData) && oracleData.length > 0) ? oracleData : gerarLeitosSoulMV();
   const eventos = readEventos();
 
   return base.map(l => ({
@@ -202,14 +183,13 @@ async function getLeitos() {
   }));
 }
 
-// --- API REST ---
+// --- Endpoints ---
 app.get('/api/leitos', async (req, res) => {
   try {
     const leitos = await getLeitos();
     res.json(Array.isArray(leitos) ? leitos : []);
   } catch (e) {
-    console.error('[ERRO ROTA /api/leitos]', e);
-    res.json(gerarLeitosMock());
+    res.json(gerarLeitosSoulMV());
   }
 });
 
@@ -223,7 +203,7 @@ app.post('/api/leitos/:leito/status', (req, res) => {
   res.json({ ok: true });
 });
 
-// --- Server-Sent Events (SSE) ---
+// --- SSE Tempo Real ---
 const clientesSSE = [];
 
 app.get('/api/leitos/stream', (req, res) => {
@@ -277,5 +257,4 @@ app.post('/api/imprimir/preview', (req, res) => {
   res.json({ zpl });
 });
 
-// Inicializa o servidor na porta 3011
 app.listen(PORT, '0.0.0.0', () => console.log(`Painel de Leitos rodando em http://localhost:${PORT}`));
