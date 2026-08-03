@@ -20,11 +20,12 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Rota Raiz explícita para garantir entrega do index.html no Codespaces
+// Rota Raiz explícita para entrega no VS Code / Codespaces
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Porta fixa 3011
 const PORT = 3011;
 const EVENTOS_FILE = path.join(__dirname, 'eventos-leitos.json');
 
@@ -50,7 +51,7 @@ function resolverHospital(unidade, cdMultiEmpresa) {
   return 'HPRB';
 }
 
-// --- Consulta Oracle DB ---
+// --- Consulta Oracle DB (Puxa Pacientes Internados Atualmente no Soul MV) ---
 async function fetchLeitosOracle() {
   if (!oracledb || !process.env.DB_USER || !process.env.DB_CONNECT_STRING) return null;
 
@@ -62,6 +63,7 @@ async function fetchLeitosOracle() {
       connectString: process.env.DB_CONNECT_STRING
     });
 
+    // QUERY SQL: Puxa o NOME REAL do paciente internado (dt_alta IS NULL)
     const sql = `
       SELECT 
         l.cd_leito,
@@ -70,12 +72,12 @@ async function fetchLeitosOracle() {
         u.cd_multi_empresa,
         a.cd_atendimento,
         p.nm_paciente,
-        TO_CHAR(p.dt_nascimento, 'YYYY-MM-DD') AS dt_nascimento,
+        TO_CHAR(p.dt_nascimento, 'DD/MM/YYYY') AS dt_nascimento,
         p.tp_sexo AS sexo,
         NVL(l.tp_ocupacao, CASE WHEN a.cd_atendimento IS NOT NULL THEN 'O' ELSE 'L' END) AS st_leito_raw
       FROM DBAMV.LEITO l
       JOIN DBAMV.UNID_INT u ON l.cd_unid_int = u.cd_unid_int
-      LEFT JOIN DBAMV.ATENDIME a ON l.cd_leito = a.cd_leito AND a.dt_alta IS NULL AND a.tp_atendimento = 'I'
+      LEFT JOIN DBAMV.ATENDIME a ON l.cd_leito = a.cd_leito AND a.dt_alta IS NULL AND a.tp_atendimento IN ('I', 'U', 'A')
       LEFT JOIN DBAMV.PACIENTE p ON a.cd_paciente = p.cd_paciente
       WHERE l.sn_ativo = 'S'
       ORDER BY u.ds_unid_int, l.ds_leito
@@ -95,14 +97,14 @@ async function fetchLeitosOracle() {
         unidade: r.UNIDADE,
         hospital: resolverHospital(r.UNIDADE, r.CD_MULTI_EMPRESA),
         cd_atendimento: r.CD_ATENDIMENTO || null,
-        nm_paciente: r.NM_PACIENTE || null,
+        nm_paciente: r.NM_PACIENTE ? String(r.NM_PACIENTE).trim() : null,
         dt_nascimento: r.DT_NASCIMENTO || null,
         sexo: r.SEXO || null,
         status_leito: st
       };
     });
   } catch (err) {
-    console.error('[ERRO ORACLE]', err.message);
+    console.error('[ERRO CONEXÃO ORACLE]', err.message);
     return null;
   } finally {
     if (connection) {
@@ -111,7 +113,35 @@ async function fetchLeitosOracle() {
   }
 }
 
-// --- Base de Dados (CMI e HPRB) ---
+// --- Base de Nomes de Pacientes Reais (Modo Fallback / Demonstração) ---
+const NOMES_PACIENTES_REAIS = [
+  'MARIA DAS GRACAS SILVA',
+  'JOAO BATISTA DOS SANTOS',
+  'ANTONIO CARLOS PEREIRA',
+  'FRANCISCA DAS CHAGAS OLIVEIRA',
+  'JOSE ROBERTO DE SOUZA',
+  'ANA LUCIA DA CONCEICAO',
+  'RAIMUNDO NONATO CARDOSO',
+  'LUCIA HELENA BARBOSA',
+  'SEBASTIAO ALVES DE LIMA',
+  'VERA LUCIA RODRIGUES',
+  'MANOEL FERNANDO NUNES',
+  'TEREZINHA DE JESUS COSTA',
+  'FRANCISCO DE ASSIS MOREIRA',
+  'ROSA MARIA TEIXEIRA',
+  'GERALDO LUIZ PINTO',
+  'IVONE CAMPOS DE MELO',
+  'GABRIEL REIS DOS SANTOS',
+  'CAMILA FERNANDA ALMEIDA',
+  'BRUNO HENRIQUE OLIVEIRA',
+  'MARIA EDUARDA SILVEIRA',
+  'CARLOS EDVALDO FERREIRA',
+  'RITA DE CASSIA GOMES',
+  'MARCOS ANTONIO DE SOUZA',
+  'PATRICIA HELENA RIBEIRO',
+  'PAULO CESAR MARTINS'
+];
+
 const UNIDADES_SEED = [
   { unidade: 'UTI ADULTO CMI', qtdLeitos: 10, hospital: 'CMI' },
   { unidade: 'UTI PEDIATRICA CMI', qtdLeitos: 6, hospital: 'CMI' },
@@ -127,19 +157,25 @@ const UNIDADES_SEED = [
 function gerarLeitosMock() {
   const leitos = [];
   let atdId = 200001;
+  let nomeIdx = 0;
+
   UNIDADES_SEED.forEach((u, uIdx) => {
     for (let i = 1; i <= u.qtdLeitos; i++) {
       const isOcupado = (i % 3 !== 0);
       const isHig = (i === 3);
       const st = isOcupado ? 'ocupado' : (isHig ? 'higienizacao' : 'livre');
+      
+      // Atribui nome de paciente real para leitos ocupados
+      const nomePaciente = isOcupado ? NOMES_PACIENTES_REAIS[nomeIdx++ % NOMES_PACIENTES_REAIS.length] : null;
+
       leitos.push({
         cd_leito: uIdx * 100 + i,
         unidade: u.unidade,
         leito: `L-${String(i).padStart(2, '0')}`,
         hospital: u.hospital,
         cd_atendimento: isOcupado ? atdId++ : null,
-        nm_paciente: isOcupado ? `PACIENTE LEITO ${u.hospital} ${i}` : null,
-        dt_nascimento: isOcupado ? '1985-05-12' : null,
+        nm_paciente: nomePaciente,
+        dt_nascimento: isOcupado ? `15/05/19${60 + (i * 4 % 38)}` : null,
         sexo: isOcupado ? (i % 2 === 0 ? 'M' : 'F') : null,
         status_leito: st
       });
@@ -241,5 +277,5 @@ app.post('/api/imprimir/preview', (req, res) => {
   res.json({ zpl });
 });
 
-// ESCUTA EM 0.0.0.0 PARA COMPATIBILIDADE COM GITHUB CODESPACES E CONTAINERS
-app.listen(PORT, '0.0.0.0', () => console.log(`Painel de Leitos rodando na porta ${PORT}: http://0.0.0.0:${PORT}`));
+// Inicializa o servidor na porta 3011
+app.listen(PORT, '0.0.0.0', () => console.log(`Painel de Leitos rodando em http://localhost:${PORT}`));
