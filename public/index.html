@@ -4,7 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Painel de Leitos Hospitalares - CMI & HPRB</title>
+  
+  <!-- Vue 3 + Bibliotecas de Exportação Excel e PDF -->
   <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+
   <style>
     :root {
       --bg-dark: #0f172a;
@@ -19,31 +25,38 @@
       --status-hig: #f59e0b;
     }
     body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg-dark); color: var(--text-main); margin: 0; padding: 16px; }
-    header { display: flex; justify-content: space-between; align-items: center; background: #020617; padding: 16px; border-radius: 12px; border: 1px solid #1f2937; margin-bottom: 16px; }
+    header { display: flex; justify-content: space-between; align-items: center; background: #020617; padding: 16px; border-radius: 12px; border: 1px solid #1f2937; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
     .hospital-tabs { display: flex; gap: 8px; }
     .tab-btn { padding: 8px 18px; border-radius: 8px; border: 1px solid #334155; background: #0f172a; color: var(--text-muted); cursor: pointer; font-weight: 600; font-size: 14px; transition: all 0.2s; }
     .tab-btn.active-cmi { background: var(--cmi-color); color: #fff; border-color: var(--cmi-color); }
     .tab-btn.active-hprb { background: var(--hprb-color); color: #fff; border-color: var(--hprb-color); }
     .tab-btn.active-todos { background: #6366f1; color: #fff; border-color: #6366f1; }
     
-    main { display: grid; grid-template-columns: 280px 1fr; gap: 16px; }
+    .btn-tools { padding: 8px 14px; border-radius: 8px; border: none; font-size: 12px; font-weight: bold; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; }
+    .btn-excel { background: #16a34a; color: white; }
+    .btn-pdf { background: #dc2626; color: white; }
+    .btn-config { background: #475569; color: white; }
+
+    main { display: grid; grid-template-columns: 300px 1fr; gap: 16px; }
     .sidebar { background: var(--sidebar-bg); border-radius: 12px; padding: 16px; border: 1px solid #1f2937; height: fit-content; }
+    
+    .search-box { margin-bottom: 16px; }
+    .search-box input { width: 100%; padding: 10px; border-radius: 8px; background: #0b1120; color: #fff; border: 1px solid #334155; box-sizing: border-box; font-size: 13px; }
+    
     .filter-group { margin-bottom: 12px; }
-    .filter-group label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; }
+    .filter-group label { display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px; text-transform: uppercase; }
     .filter-group select { width: 100%; padding: 8px; border-radius: 6px; background: #0b1120; color: #fff; border: 1px solid #334155; }
     
-    .census-box { background: #0b1120; border-radius: 8px; padding: 12px; margin-top: 12px; border: 1px solid #1f2937; }
-    .census-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
-    .census-row.total { font-weight: bold; border-bottom: 1px solid #1f2937; padding-bottom: 6px; }
+    .census-card { background: #0b1120; border-radius: 10px; padding: 12px; margin-top: 10px; border: 1px solid #1f2937; }
+    .census-title { font-weight: bold; font-size: 14px; margin-bottom: 8px; display: flex; justify-content: space-between; border-bottom: 1px solid #1f2937; padding-bottom: 4px; }
+    .census-row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
     
-    .history-box { background: #0b1120; border-radius: 8px; padding: 12px; margin-top: 16px; border: 1px solid #1f2937; max-height: 250px; overflow-y: auto; }
+    .history-box { background: #0b1120; border-radius: 8px; padding: 12px; margin-top: 16px; border: 1px solid #1f2937; max-height: 220px; overflow-y: auto; }
     .history-item { font-size: 11px; padding: 6px 0; border-bottom: 1px dashed #1f2937; }
-    .history-item:last-child { border-bottom: none; }
     .history-user { font-weight: bold; color: #60a5fa; }
-    .history-status { text-transform: capitalize; font-weight: 600; }
-    
+
     .grid-leitos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
-    .card-leito { background: var(--card-bg); border-radius: 10px; padding: 14px; border-left: 5px solid #64748b; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); position: relative; }
+    .card-leito { background: var(--card-bg); border-radius: 10px; padding: 14px; border-left: 5px solid #64748b; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); }
     .card-leito.ocupado { border-left-color: var(--status-ocupado); }
     .card-leito.livre { border-left-color: var(--status-livre); }
     .card-leito.higienizacao { border-left-color: var(--status-hig); }
@@ -62,12 +75,18 @@
     .action-bar { display: flex; gap: 6px; margin-top: 12px; }
     .btn-action { flex: 1; padding: 6px; border-radius: 6px; border: none; font-size: 11px; font-weight: 600; cursor: pointer; background: #2563eb; color: #fff; }
     .btn-action.alt { background: #334155; }
-    .btn-action:hover { opacity: 0.9; }
     
     .select-status { margin-top: 8px; width: 100%; padding: 6px; border-radius: 6px; background: #0f172a; color: #fff; border: 1px solid #334155; font-size: 12px; cursor: pointer; }
     .live-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #34d399; }
     .dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0% { transform: scale(0.95); opacity: 0.7; } 50% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(0.95); opacity: 0.7; } }
+
+    /* Modal de Configuração */
+    .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 999; }
+    .modal-box { background: #1e293b; padding: 20px; border-radius: 12px; width: 420px; border: 1px solid #334155; }
+    .modal-box h3 { margin-top: 0; }
+    .modal-box label { display: block; font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+    .modal-box input, .modal-box select { width: 100%; padding: 8px; margin-top: 4px; border-radius: 6px; background: #0b1120; color: white; border: 1px solid #334155; box-sizing: border-box; }
   </style>
 </head>
 <body>
@@ -77,16 +96,27 @@
       <h1 style="margin:0; font-size: 20px;">Painel de Leitos Hospitalares</h1>
       <span class="live-indicator"><span class="dot"></span> Sincronização em Tempo Real (SSE)</span>
     </div>
+    
     <div class="hospital-tabs">
       <button class="tab-btn" :class="{ 'active-cmi': abaHospital === 'CMI' }" @click="abaHospital = 'CMI'">CMI ({{ countCMI }})</button>
       <button class="tab-btn" :class="{ 'active-hprb': abaHospital === 'HPRB' }" @click="abaHospital = 'HPRB'">HPRB ({{ countHPRB }})</button>
       <button class="tab-btn" :class="{ 'active-todos': abaHospital === 'TODOS' }" @click="abaHospital = 'TODOS'">TODOS ({{ leitos.length }})</button>
     </div>
+
+    <div style="display:flex; gap:8px;">
+      <button class="btn-tools btn-excel" @click="exportarExcel">📊 Excel</button>
+      <button class="btn-tools btn-pdf" @click="exportarPDF">📄 PDF</button>
+      <button class="btn-tools btn-config" @click="exibirModalConfig = true">⚙️ Impressora</button>
+    </div>
   </header>
 
   <main>
     <aside class="sidebar">
-      <h3>Filtros de Exibição</h3>
+      <div class="search-box">
+        <label style="font-size:11px; color:var(--text-muted); text-transform:uppercase;">🔍 Buscar Paciente / Leito</label>
+        <input type="text" v-model="buscaTexto" placeholder="Nome, leito ou atendimento...">
+      </div>
+
       <div class="filter-group">
         <label>Unidade / Setor</label>
         <select v-model="filtroUnidade">
@@ -104,20 +134,35 @@
         </select>
       </div>
 
-      <h3>Censo Hospitalar</h3>
-      <div class="census-box">
-        <div class="census-row total"><span>Total de Leitos</span><span>{{ censo.total }}</span></div>
-        <div class="census-row"><span>Ocupados</span><span style="color:var(--status-ocupado)">{{ censo.ocupados }}</span></div>
-        <div class="census-row"><span>Livres</span><span style="color:var(--status-livre)">{{ censo.livres }}</span></div>
-        <div class="census-row"><span>Higienização</span><span style="color:var(--status-hig)">{{ censo.higienizacao }}</span></div>
-        <div class="census-row" style="margin-top:8px; font-weight:bold;"><span>Taxa de Ocupação</span><span>{{ censo.taxa }}%</span></div>
+      <!-- CENSO SEPARADO 100% CMI -->
+      <div class="census-card" style="border-top: 3px solid var(--cmi-color);">
+        <div class="census-title">
+          <span>🏥 Censo CMI</span>
+          <span style="color:var(--cmi-color)">{{ censoCMI.taxa }}%</span>
+        </div>
+        <div class="census-row"><span>Total Leitos</span><span>{{ censoCMI.total }}</span></div>
+        <div class="census-row"><span>Ocupados</span><span style="color:var(--status-ocupado)">{{ censoCMI.ocupados }}</span></div>
+        <div class="census-row"><span>Livres</span><span style="color:var(--status-livre)">{{ censoCMI.livres }}</span></div>
+        <div class="census-row"><span>Higienização</span><span style="color:var(--status-hig)">{{ censoCMI.higienizacao }}</span></div>
+      </div>
+
+      <!-- CENSO SEPARADO 100% HPRB -->
+      <div class="census-card" style="border-top: 3px solid var(--hprb-color);">
+        <div class="census-title">
+          <span>🏥 Censo HPRB</span>
+          <span style="color:var(--hprb-color)">{{ censoHPRB.taxa }}%</span>
+        </div>
+        <div class="census-row"><span>Total Leitos</span><span>{{ censoHPRB.total }}</span></div>
+        <div class="census-row"><span>Ocupados</span><span style="color:var(--status-ocupado)">{{ censoHPRB.ocupados }}</span></div>
+        <div class="census-row"><span>Livres</span><span style="color:var(--status-livre)">{{ censoHPRB.livres }}</span></div>
+        <div class="census-row"><span>Higienização</span><span style="color:var(--status-hig)">{{ censoHPRB.higienizacao }}</span></div>
       </div>
 
       <h3 style="margin-top: 20px;">Histórico de Alterações</h3>
       <div class="history-box">
         <div v-if="historico.length === 0" style="font-size:11px; color:var(--text-muted);">Nenhuma alteração recente.</div>
         <div v-for="h in historico" :key="h.id" class="history-item">
-          <div><strong style="color:#fff">{{ h.leito }}</strong>: <span class="history-status">{{ h.status_anterior }}</span> ➔ <span class="history-status" style="color:#34d399">{{ h.status_novo }}</span></div>
+          <div><strong style="color:#fff">{{ h.leito }}</strong>: {{ h.status_anterior }} ➔ <span style="color:#34d399">{{ h.status_novo }}</span></div>
           <div style="color:var(--text-muted); font-size: 10px;">Por <span class="history-user">{{ h.usuario }}</span> às {{ h.hora }}</div>
         </div>
       </div>
@@ -154,6 +199,32 @@
       </div>
     </section>
   </main>
+
+  <!-- MODAL DE CONFIGURAÇÃO SALVA DE IMPRESSORA -->
+  <div class="modal-overlay" v-if="exibirModalConfig">
+    <div class="modal-box">
+      <h3>⚙️ Configuração Padrão da Impressora</h3>
+      <label>IP da Impressora de Rede (TCP/IP)</label>
+      <input type="text" v-model="configImpressora.ip" placeholder="192.168.0.50">
+
+      <label>Porta de Impressão</label>
+      <input type="number" v-model="configImpressora.port" placeholder="9100">
+
+      <label>Modelo / Protocolo</label>
+      <select v-model="configImpressora.modelo">
+        <option value="zebra">Zebra (ZPL II)</option>
+        <option value="elgin">Elgin (ZPL / EPL)</option>
+      </select>
+
+      <label>Densidade de Impressão (Darkness: 1 a 30)</label>
+      <input type="number" v-model="configImpressora.darkness" min="1" max="30">
+
+      <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:16px;">
+        <button class="btn-action alt" @click="exibirModalConfig = false">Cancelar</button>
+        <button class="btn-action" @click="salvarConfigImpressora">Salvar Padrão</button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -164,8 +235,16 @@ createApp({
       leitos: [],
       historico: [],
       abaHospital: 'CMI',
+      buscaTexto: '',
       filtroUnidade: '',
-      filtroStatus: ''
+      filtroStatus: '',
+      exibirModalConfig: false,
+      configImpressora: {
+        ip: '192.168.0.50',
+        port: 9100,
+        modelo: 'zebra',
+        darkness: 15
+      }
     };
   },
   computed: {
@@ -180,22 +259,29 @@ createApp({
     },
     leitosFiltrados() {
       return this.leitosPorAba.filter(l => {
+        const txt = this.buscaTexto.toLowerCase();
+        const mBusca = !txt || 
+          (l.nm_paciente && l.nm_paciente.toLowerCase().includes(txt)) ||
+          (l.leito && l.leito.toLowerCase().includes(txt)) ||
+          (l.cd_atendimento && String(l.cd_atendimento).includes(txt));
+        
         const mUnid = !this.filtroUnidade || l.unidade === this.filtroUnidade;
         const mStat = !this.filtroStatus || l.status_leito === this.filtroStatus;
-        return mUnid && mStat;
+        return mBusca && mUnid && mStat;
       });
     },
-    censo() {
-      const base = this.leitosPorAba;
+    censoCMI() { return this.calcularCenso(this.leitos.filter(l => l.hospital === 'CMI')); },
+    censoHPRB() { return this.calcularCenso(this.leitos.filter(l => l.hospital === 'HPRB')); }
+  },
+  methods: {
+    calcularCenso(base) {
       const total = base.length;
       const ocupados = base.filter(l => l.status_leito === 'ocupado').length;
       const livres = base.filter(l => l.status_leito === 'livre').length;
       const higienizacao = base.filter(l => l.status_leito === 'higienizacao').length;
       const taxa = total > 0 ? ((ocupados / total) * 100).toFixed(1) : 0;
       return { total, ocupados, livres, higienizacao, taxa };
-    }
-  },
-  methods: {
+    },
     async carregar() {
       try {
         const r = await fetch('/api/leitos');
@@ -212,11 +298,11 @@ createApp({
       const statusAnterior = l.status_leito;
       if (statusAnterior === novoStatus) return;
 
-      const usuario = prompt(`Alteração do Leito ${l.leito} (${statusAnterior.toUpperCase()} ➔ ${novoStatus.toUpperCase()}):\n\nPor favor, digite seu NOME ou MATRÍCULA para registrar no histórico:`);
+      const usuario = prompt(`Alteração no Leito ${l.leito} (${statusAnterior.toUpperCase()} ➔ ${novoStatus.toUpperCase()}):\n\nDigite seu NOME ou MATRÍCULA para registrar no histórico:`);
       
       if (!usuario || !usuario.trim()) {
         alert('Alteração cancelada! É obrigatório informar o nome do responsável.');
-        this.carregar(); // restaura a seleção no select
+        this.carregar();
         return;
       }
 
@@ -241,7 +327,8 @@ createApp({
         sexo: l.sexo,
         leito: l.leito,
         unidade: l.unidade,
-        hospital: l.hospital
+        hospital: l.hospital,
+        printer: this.configImpressora
       };
       const r = await fetch(endpoint, {
         method: 'POST',
@@ -249,7 +336,51 @@ createApp({
         body: JSON.stringify(body)
       });
       const j = await r.json();
-      alert(j.erro ? 'Erro de Impressão: ' + j.erro : 'Solicitação de impressão enviada com sucesso!');
+      alert(j.erro ? 'Erro de Impressão: ' + j.erro : 'Impressão enviada para a impressora configurada (' + this.configImpressora.ip + ')!');
+    },
+    salvarConfigImpressora() {
+      localStorage.setItem('config_impressora_leitos', JSON.stringify(this.configImpressora));
+      this.exibirModalConfig = false;
+      alert('Configuração padrão salva com sucesso!');
+    },
+    carregarConfigImpressora() {
+      const c = localStorage.getItem('config_impressora_leitos');
+      if (c) {
+        try { this.configImpressora = JSON.parse(c); } catch (_) {}
+      }
+    },
+    exportarExcel() {
+      const dados = this.leitosFiltrados.map(l => ({
+        Hospital: l.hospital,
+        Unidade: l.unidade,
+        Leito: l.leito,
+        Status: l.status_leito.toUpperCase(),
+        Paciente: l.nm_paciente || 'VAGO',
+        Atendimento: l.cd_atendimento || '-',
+        Nascimento: l.dt_nascimento || '-',
+        Sexo: l.sexo || '-'
+      }));
+      const ws = XLSX.utils.json_to_sheet(dados);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Mapa de Leitos");
+      XLSX.writeFile(wb, `Mapa_de_Leitos_${this.abaHospital}.xlsx`);
+    },
+    exportarPDF() {
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF('landscape');
+      doc.text(`Relatório do Mapa de Leitos - ${this.abaHospital}`, 14, 15);
+      
+      const rows = this.leitosFiltrados.map(l => [
+        l.hospital, l.unidade, l.leito, l.status_leito.toUpperCase(), l.nm_paciente || 'VAGO', l.cd_atendimento || '-', l.dt_nascimento || '-'
+      ]);
+
+      doc.autoTable({
+        head: [['Hospital', 'Unidade', 'Leito', 'Status', 'Paciente', 'Atendimento', 'Nascimento']],
+        body: rows,
+        startY: 20
+      });
+
+      doc.save(`Mapa_de_Leitos_${this.abaHospital}.pdf`);
     },
     iniciarSSE() {
       const evtSource = new EventSource('/api/leitos/stream');
@@ -258,6 +389,7 @@ createApp({
     }
   },
   mounted() {
+    this.carregarConfigImpressora();
     this.carregar();
     this.iniciarSSE();
   }
