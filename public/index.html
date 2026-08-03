@@ -36,6 +36,12 @@
     .census-row { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px; }
     .census-row.total { font-weight: bold; border-bottom: 1px solid #1f2937; padding-bottom: 6px; }
     
+    .history-box { background: #0b1120; border-radius: 8px; padding: 12px; margin-top: 16px; border: 1px solid #1f2937; max-height: 250px; overflow-y: auto; }
+    .history-item { font-size: 11px; padding: 6px 0; border-bottom: 1px dashed #1f2937; }
+    .history-item:last-child { border-bottom: none; }
+    .history-user { font-weight: bold; color: #60a5fa; }
+    .history-status { text-transform: capitalize; font-weight: 600; }
+    
     .grid-leitos { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
     .card-leito { background: var(--card-bg); border-radius: 10px; padding: 14px; border-left: 5px solid #64748b; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.3); position: relative; }
     .card-leito.ocupado { border-left-color: var(--status-ocupado); }
@@ -58,7 +64,7 @@
     .btn-action.alt { background: #334155; }
     .btn-action:hover { opacity: 0.9; }
     
-    .select-status { margin-top: 8px; width: 100%; padding: 4px; border-radius: 4px; background: #0f172a; color: #fff; border: 1px solid #334155; font-size: 12px; }
+    .select-status { margin-top: 8px; width: 100%; padding: 6px; border-radius: 6px; background: #0f172a; color: #fff; border: 1px solid #334155; font-size: 12px; cursor: pointer; }
     .live-indicator { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #34d399; }
     .dot { width: 8px; height: 8px; background: #10b981; border-radius: 50%; animation: pulse 1.5s infinite; }
     @keyframes pulse { 0% { transform: scale(0.95); opacity: 0.7; } 50% { transform: scale(1.15); opacity: 1; } 100% { transform: scale(0.95); opacity: 0.7; } }
@@ -69,7 +75,7 @@
   <header>
     <div>
       <h1 style="margin:0; font-size: 20px;">Painel de Leitos Hospitalares</h1>
-      <span class="live-indicator"><span class="dot"></span> Tempo Real Ativo (SSE)</span>
+      <span class="live-indicator"><span class="dot"></span> Sincronização em Tempo Real (SSE)</span>
     </div>
     <div class="hospital-tabs">
       <button class="tab-btn" :class="{ 'active-cmi': abaHospital === 'CMI' }" @click="abaHospital = 'CMI'">CMI ({{ countCMI }})</button>
@@ -106,6 +112,15 @@
         <div class="census-row"><span>Higienização</span><span style="color:var(--status-hig)">{{ censo.higienizacao }}</span></div>
         <div class="census-row" style="margin-top:8px; font-weight:bold;"><span>Taxa de Ocupação</span><span>{{ censo.taxa }}%</span></div>
       </div>
+
+      <h3 style="margin-top: 20px;">Histórico de Alterações</h3>
+      <div class="history-box">
+        <div v-if="historico.length === 0" style="font-size:11px; color:var(--text-muted);">Nenhuma alteração recente.</div>
+        <div v-for="h in historico" :key="h.id" class="history-item">
+          <div><strong style="color:#fff">{{ h.leito }}</strong>: <span class="history-status">{{ h.status_anterior }}</span> ➔ <span class="history-status" style="color:#34d399">{{ h.status_novo }}</span></div>
+          <div style="color:var(--text-muted); font-size: 10px;">Por <span class="history-user">{{ h.usuario }}</span> às {{ h.hora }}</div>
+        </div>
+      </div>
     </aside>
 
     <section class="grid-leitos">
@@ -126,7 +141,7 @@
           Atd: {{ l.cd_atendimento }} | Nasc: {{ l.dt_nascimento }} | Sexo: {{ l.sexo }}
         </div>
 
-        <select class="select-status" v-model="l.status_leito" @change="mudarStatus(l)">
+        <select class="select-status" :value="l.status_leito" @change="solicitarMudancaStatus(l, $event.target.value)">
           <option value="ocupado">Ocupado</option>
           <option value="livre">Livre</option>
           <option value="higienizacao">Higienização</option>
@@ -147,6 +162,7 @@ createApp({
   data() {
     return {
       leitos: [],
+      historico: [],
       abaHospital: 'CMI',
       filtroUnidade: '',
       filtroStatus: ''
@@ -184,19 +200,37 @@ createApp({
       try {
         const r = await fetch('/api/leitos');
         const data = await r.json();
-        if (Array.isArray(data)) {
-          this.leitos = data;
+        if (data && Array.isArray(data.leitos)) {
+          this.leitos = data.leitos;
+          this.historico = data.historico || [];
         }
       } catch (err) {
         console.error('Erro ao carregar leitos:', err);
       }
     },
-    async mudarStatus(l) {
+    async solicitarMudancaStatus(l, novoStatus) {
+      const statusAnterior = l.status_leito;
+      if (statusAnterior === novoStatus) return;
+
+      const usuario = prompt(`Alteração do Leito ${l.leito} (${statusAnterior.toUpperCase()} ➔ ${novoStatus.toUpperCase()}):\n\nPor favor, digite seu NOME ou MATRÍCULA para registrar no histórico:`);
+      
+      if (!usuario || !usuario.trim()) {
+        alert('Alteração cancelada! É obrigatório informar o nome do responsável.');
+        this.carregar(); // restaura a seleção no select
+        return;
+      }
+
       await fetch(`/api/leitos/${encodeURIComponent(l.leito)}/status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status_leito: l.status_leito, usuario: 'painel' })
+        body: JSON.stringify({
+          status_leito: novoStatus,
+          status_anterior: statusAnterior,
+          usuario: usuario.trim()
+        })
       });
+
+      this.carregar();
     },
     async imprimir(l, tipo) {
       const endpoint = tipo === 'pulseira' ? '/api/imprimir/pulseira' : '/api/imprimir/etiqueta';
@@ -220,7 +254,7 @@ createApp({
     iniciarSSE() {
       const evtSource = new EventSource('/api/leitos/stream');
       evtSource.onmessage = () => this.carregar();
-      evtSource.onerror = () => setTimeout(() => this.iniciarSSE(), 5000);
+      evtSource.onerror = () => setTimeout(() => this.iniciarSSE(), 4000);
     }
   },
   mounted() {
