@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Preview de Impressao - Pulseira/Etiqueta</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<style>
+ body{font-family:Segoe UI,Arial,sans-serif;background:#f1f5f9;margin:0;padding:20px}
+ .form{max-width:420px;background:#fff;padding:16px;border-radius:8px;box-shadow:0 1px 4px #0002;margin-bottom:20px}
+ input,select{width:100%;padding:6px;margin:4px 0 10px;box-sizing:border-box}
+ button{padding:8px 14px;border:none;background:#2563eb;color:#fff;border-radius:6px;cursor:pointer}
+ img{border:1px solid #ccc;background:#fff}
+</style>
+</head>
+<body>
+<div id="app">
+ <div class="form">
+  <label>Nome do paciente</label><input v-model="f.nm_paciente">
+  <label>Atendimento</label><input v-model="f.cd_atendimento">
+  <label>Nascimento</label><input v-model="f.dt_nascimento" placeholder="AAAA-MM-DD">
+  <label>Sexo</label><input v-model="f.sexo">
+  <label>Leito</label><input v-model="f.leito">
+  <label>Unidade</label><input v-model="f.unidade">
+  <label>Alergia</label><input v-model="f.alergia">
+  <label>Tipo</label>
+  <select v-model="f.tipo"><option value="pulseira">Pulseira</option><option value="etiqueta">Etiqueta</option></select>
+  <button @click="gerarPreview">Gerar preview</button>
+  <button @click="imprimir">Imprimir</button>
+ </div>
+ <img v-if="imgUrl" :src="imgUrl">
+</div>
+<script>
+const { createApp } = Vue;
+createApp({
+ data(){ return { f:{nm_paciente:'',cd_atendimento:'',dt_nascimento:'',sexo:'',leito:'',unidade:'',alergia:'',tipo:'pulseira'}, zpl:'', imgUrl:'' } },
+ methods:{
+  async gerarPreview(){
+   const r = await fetch('/api/imprimir/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.f)});
+   const j = await r.json(); this.zpl = j.zpl;
+   const lr = await fetch('https://api.labelary.com/v1/printers/8dpmm/labels/4x2/0/',{method:'POST',headers:{'Accept':'image/png','Content-Type':'application/x-www-form-urlencoded'},body:this.zpl});
+   const blob = await lr.blob(); this.imgUrl = URL.createObjectURL(blob);
+  },
+  async imprimir(){
+   const endpoint = this.f.tipo === 'pulseira' ? '/api/imprimir/pulseira' : '/api/imprimir/etiqueta';
+   const r = await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(this.f)});
+   const j = await r.json();
+   if(j.erro) alert('Erro: '+j.erro); else alert('Enviado para a impressora!');
+  }
+ }
+}).mount('#app');
+</script>
+</body>
+</html>

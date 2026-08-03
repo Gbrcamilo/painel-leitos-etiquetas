@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Painel de Leitos</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<style>
+ body{font-family:Segoe UI,Arial,sans-serif;background:#0f172a;color:#e2e8f0;margin:0;padding:20px}
+ h1{font-size:22px;margin-bottom:16px}
+ .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
+ .card{background:#1e293b;border-radius:10px;padding:14px;border-left:6px solid #64748b}
+ .ocupado{border-color:#ef4444}
+ .livre{border-color:#22c55e}
+ .higienizacao{border-color:#f59e0b}
+ .leito{font-size:20px;font-weight:700}
+ .unidade{color:#94a3b8;font-size:13px}
+ .paciente{margin:8px 0;font-weight:600}
+ .info{font-size:12px;color:#cbd5e1}
+ button{margin-top:10px;margin-right:6px;padding:6px 10px;border:none;border-radius:6px;cursor:pointer;background:#3b82f6;color:#fff;font-size:12px}
+ button.alt{background:#334155}
+ select{margin-top:8px;width:100%;padding:4px;border-radius:6px}
+</style>
+</head>
+<body>
+<div id="app">
+ <h1>Painel de Leitos ({{ leitos.length }} leitos)</h1>
+ <div class="grid">
+  <div v-for="l in leitos" :key="l.leito" class="card" :class="l.status_leito">
+   <div class="unidade">{{ l.unidade }}</div>
+   <div class="leito">Leito {{ l.leito }}</div>
+   <div class="paciente">{{ l.nm_paciente || '-- Sem paciente --' }}</div>
+   <div class="info" v-if="l.cd_atendimento">Atend: {{ l.cd_atendimento }} | Nasc: {{ l.dt_nascimento }} | Sexo: {{ l.sexo }}</div>
+   <select v-model="l.status_leito" @change="mudarStatus(l)">
+     <option value="ocupado">Ocupado</option>
+     <option value="livre">Livre</option>
+     <option value="higienizacao">Higienizacao</option>
+   </select>
+   <div v-if="l.cd_atendimento">
+    <button @click="imprimir(l,'pulseira')">Imprimir pulseira</button>
+    <button class="alt" @click="imprimir(l,'etiqueta')">Imprimir etiqueta</button>
+   </div>
+  </div>
+ </div>
+</div>
+<script>
+const { createApp } = Vue;
+createApp({
+ data(){ return { leitos: [] } },
+ methods:{
+  async carregar(){ const r = await fetch('/api/leitos'); this.leitos = await r.json(); },
+  async mudarStatus(l){ await fetch(`/api/leitos/${l.leito}/status`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status_leito:l.status_leito,usuario:'painel'})}); },
+  async imprimir(l,tipo){
+   const endpoint = tipo === 'pulseira' ? '/api/imprimir/pulseira' : '/api/imprimir/etiqueta';
+   const body = { nm_paciente:l.nm_paciente, cd_atendimento:l.cd_atendimento, dt_nascimento:l.dt_nascimento, sexo:l.sexo, leito:l.leito, unidade:l.unidade, tipo:'GERAL' };
+   const r = await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+   const j = await r.json();
+   if(j.erro) alert('Erro ao imprimir: '+j.erro); else alert('Enviado para impressora!');
+  }
+ },
+ mounted(){ this.carregar(); setInterval(this.carregar, 30000); }
+}).mount('#app');
+</script>
+</body>
+</html>
