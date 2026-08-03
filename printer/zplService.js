@@ -1,74 +1,66 @@
 const net = require('net');
 
-function printZPL(zpl, printerConfig = {}) {
+/**
+ * Converte dados de um paciente em código ZPL II (Zebra) 100x50mm
+ */
+function gerarCodigoZPL(paciente) {
+  const leito = (paciente.leito || '').toUpperCase();
+  const setor = (paciente.setor || '').toUpperCase();
+  const nome = (paciente.nome_paciente || paciente.nome || '').toUpperCase();
+  const atend = paciente.cd_atendimento || 'N/A';
+  const nasc = paciente.data_nasc || 'N/I';
+  const dieta = (paciente.dieta || 'GERAL').toUpperCase();
+  const alergia = (paciente.alergia || 'NENHUMA').toUpperCase();
+
+  return `
+^XA
+^PW800
+^LL400
+^FO30,30^GB740,0,3^FS
+^FO30,40^A0N,28,28^FDHOSPITAL CMI - PAINEL DE LEITOS^FS
+^FO580,35^GB180,45,45,B,0^FS
+^FO590,45^A0N,30,30^FR^FD${leito}^FS
+^FO30,85^A0N,22,22^FDSETOR: ${setor}^FS
+^FO30,120^A0N,32,32^FD${nome.substring(0, 32)}^FS
+^FO30,170^A0N,24,24^FDATEND: #${atend}^FS
+^FO400,170^A0N,24,24^FDNASC: ${nasc}^FS
+^FO30,210^A0N,24,24^FDDIETA: ${dieta}^FS
+^FO400,210^A0N,24,24^FDALERGIA: ${alergia}^FS
+^FO30,260^GB740,0,2^FS
+^FO30,275^BQN,2,4^FDQA,CMI|ATEND:${atend}|LEITO:${leito}^FS
+^FO200,290^A0N,20,20^FDPACIENTE ATIVO EM TEMPO REAL^FS
+^FO200,320^A0N,18,18^FDEMISSAO: ${new Date().toLocaleString('pt-BR')}^FS
+^XZ
+`;
+}
+
+/**
+ * Envia string ZPL via TCP Socket (porta 9100) para a impressora na rede
+ */
+function enviarParaImpressoraZPL(listaPacientes, ipImpressora = '192.168.1.200', porta = 9100) {
   return new Promise((resolve, reject) => {
-    const ip = printerConfig.ip || process.env.PRINTER_DEFAULT_IP || '192.168.0.50';
-    const port = Number(printerConfig.port || process.env.PRINTER_DEFAULT_PORT) || 9100;
+    if (!listaPacientes || listaPacientes.length === 0) {
+      return reject(new Error('Nenhum paciente fornecido para envio ZPL.'));
+    }
 
-    if (!ip) return reject(new Error('IP da impressora não configurado.'));
+    const zplAcumulado = listaPacientes.map(gerarCodigoZPL).join('\n');
+    const client = new net.Socket();
 
-    const socket = new net.Socket();
-    socket.setTimeout(6000);
-
-    socket.connect(port, ip, () => {
-      socket.write(zpl, 'utf8', () => {
-        socket.end();
-        resolve(true);
+    client.connect(porta, ipImpressora, () => {
+      client.write(zplAcumulado, () => {
+        client.destroy();
+        resolve({ impressos: listaPacientes.length });
       });
     });
 
-    socket.on('timeout', () => { socket.destroy(); reject(new Error(`Timeout ao conectar na impressora no IP ${ip}:${port}`)); });
-    socket.on('error', (err) => reject(new Error(`Erro de comunicação com impressora (${ip}): ${err.message}`)));
+    client.on('error', (err) => {
+      client.destroy();
+      reject(err);
+    });
   });
 }
 
-function escapeZPL(text = '') {
-  return String(text).replace(/\^/g, '').replace(/~/g, '').toUpperCase();
-}
-
-function buildWristbandZPL(dados = {}) {
-  const nm = escapeZPL(dados.nm_paciente || '');
-  const atd = escapeZPL(dados.cd_atendimento || '');
-  const nasc = escapeZPL(dados.dt_nascimento || '');
-  const sexo = escapeZPL(dados.sexo || '');
-  const leito = escapeZPL(dados.leito || '');
-  const unidade = escapeZPL(dados.unidade || '');
-  const hosp = escapeZPL(dados.hospital || '');
-  const dark = dados.printer?.darkness || 15;
-
-  return `
-^XA
-~SD${dark}
-^PW200
-^LL1200
-^POO
-^FO20,30^A0N,28,28^FDHOSPITAL ${hosp}^FS
-^FO20,65^A0N,22,22^FDLEITO: ${leito} - ${unidade}^FS
-^FO20,100^A0N,26,26^FDPACIENTE:^FS
-^FO20,130^A0N,28,28^FB180,2,,^FD${nm}^FS
-^FO20,190^A0N,22,22^FDATD: ${atd}^FS
-^FO20,220^A0N,22,22^FDNASC: ${nasc}  SEXO: ${sexo}^FS
-^FO20,260^BY2,2.0,50^BCN,50,Y,N,N^FD${atd}^FS
-^XZ
-  `.trim();
-}
-
-function buildLabelZPL(dados = {}) {
-  const nm = escapeZPL(dados.nm_paciente || '');
-  const atd = escapeZPL(dados.cd_atendimento || '');
-  const leito = escapeZPL(dados.leito || '');
-  const unidade = escapeZPL(dados.unidade || '');
-  const dark = dados.printer?.darkness || 15;
-
-  return `
-^XA
-~SD${dark}
-^FO20,20^A0N,24,24^FDPACIENTE: ${nm}^FS
-^FO20,50^A0N,22,22^FDLEITO: ${leito} | ATD: ${atd}^FS
-^FO20,80^A0N,20,20^FDUNIDADE: ${unidade}^FS
-^FO20,110^BY2,2.0,40^BCN,40,Y,N,N^FD${atd}^FS
-^XZ
-  `.trim();
-}
-
-module.exports = { printZPL, buildWristbandZPL, buildLabelZPL };
+module.exports = {
+  gerarCodigoZPL,
+  enviarParaImpressoraZPL
+};
