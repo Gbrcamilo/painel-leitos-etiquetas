@@ -12,7 +12,7 @@ try {
     try { oracledb.initOracleClient({ libDir: process.env.ORACLE_CLIENT_LIB_DIR }); } catch (_) {}
   }
 } catch (_) {
-  console.log('[AVISO] Módulo oracledb não instalado. Modo Mock/Fallback ativo.');
+  console.log('[AVISO] Módulo oracledb não instalado. Modo Fallback/Mock ativo.');
 }
 
 const app = express();
@@ -20,10 +20,14 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Rota Raiz explícita para garantir entrega do index.html no Codespaces
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
 const PORT = process.env.PORT || 3011;
 const EVENTOS_FILE = path.join(__dirname, 'eventos-leitos.json');
 
-// --- Persistência de alterações manuais de status ---
 function readEventos() {
   if (!fs.existsSync(EVENTOS_FILE)) return {};
   try { return JSON.parse(fs.readFileSync(EVENTOS_FILE, 'utf-8')); } catch { return {}; }
@@ -32,7 +36,7 @@ function writeEventos(data) {
   fs.writeFileSync(EVENTOS_FILE, JSON.stringify(data, null, 2));
 }
 
-// --- Classificação Rígida de Hospital (CMI vs HPRB) ---
+// --- Classificação CMI vs HPRB ---
 const UNIDADES_CMI = ['UTI ADULTO', 'UTI PEDIATRICA', 'UTI NEONATAL', 'SEMI INTENSIVA', 'CMI'];
 const UNIDADES_HPRB = ['ENFERMARIA', 'PRONTO SOCORRO', 'MATERNIDADE', 'CLINICA MEDICA', 'CLINICA CIRURGICA', 'HPRB'];
 
@@ -46,7 +50,7 @@ function resolverHospital(unidade, cdMultiEmpresa) {
   return 'HPRB';
 }
 
-// --- Consulta Oracle DB (Soul MV / Tasy / MV2000) ---
+// --- Consulta Oracle DB ---
 async function fetchLeitosOracle() {
   if (!oracledb || !process.env.DB_USER || !process.env.DB_CONNECT_STRING) return null;
 
@@ -58,7 +62,6 @@ async function fetchLeitosOracle() {
       connectString: process.env.DB_CONNECT_STRING
     });
 
-    // QUERY SQL COM LEFT JOIN: Tráz 100% dos leitos (Ocupados, Livres e Higienização)
     const sql = `
       SELECT 
         l.cd_leito,
@@ -99,7 +102,7 @@ async function fetchLeitosOracle() {
       };
     });
   } catch (err) {
-    console.error('[ERRO ORACLE CONEXÃO]', err.message);
+    console.error('[ERRO ORACLE]', err.message);
     return null;
   } finally {
     if (connection) {
@@ -108,7 +111,7 @@ async function fetchLeitosOracle() {
   }
 }
 
-// --- Base de Dados de Leitos (CMI e HPRB) ---
+// --- Base de Dados (CMI e HPRB) ---
 const UNIDADES_SEED = [
   { unidade: 'UTI ADULTO CMI', qtdLeitos: 10, hospital: 'CMI' },
   { unidade: 'UTI PEDIATRICA CMI', qtdLeitos: 6, hospital: 'CMI' },
@@ -153,7 +156,6 @@ async function getLeitos() {
     console.error('[ERRO BUSCA LEITOS]', e);
   }
 
-  // Garantia defensiva: se o Oracle não retornar dados, usa o mock completo
   const base = (Array.isArray(oracleData) && oracleData.length > 0) ? oracleData : gerarLeitosMock();
   const eventos = readEventos();
 
@@ -164,7 +166,7 @@ async function getLeitos() {
   }));
 }
 
-// --- Rota Principal de Leitos ---
+// --- API REST ---
 app.get('/api/leitos', async (req, res) => {
   try {
     const leitos = await getLeitos();
@@ -185,7 +187,7 @@ app.post('/api/leitos/:leito/status', (req, res) => {
   res.json({ ok: true });
 });
 
-// --- Server-Sent Events (SSE) em Tempo Real ---
+// --- Server-Sent Events (SSE) ---
 const clientesSSE = [];
 
 app.get('/api/leitos/stream', (req, res) => {
@@ -212,7 +214,7 @@ function broadcastSSE() {
 
 setInterval(broadcastSSE, 10000);
 
-// --- Rotas de Impressão (Zebra/Elgin ZPL) ---
+// --- Rotas de Impressão (ZPL) ---
 app.post('/api/imprimir/pulseira', async (req, res) => {
   try {
     const zpl = buildWristbandZPL(req.body);
@@ -239,4 +241,5 @@ app.post('/api/imprimir/preview', (req, res) => {
   res.json({ zpl });
 });
 
-app.listen(PORT, () => console.log(`Painel de Leitos rodando na porta ${PORT}: http://localhost:${PORT}`));
+// ESCUTA EM 0.0.0.0 PARA COMPATIBILIDADE COM GITHUB CODESPACES E CONTAINERS
+app.listen(PORT, '0.0.0.0', () => console.log(`Painel de Leitos rodando na porta ${PORT}: http://0.0.0.0:${PORT}`));
