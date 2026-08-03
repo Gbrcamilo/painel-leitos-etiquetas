@@ -1,0 +1,5 @@
+node_modules/
+.env
+*.log
+auditoria-local.json
+eventos-leitos.json
