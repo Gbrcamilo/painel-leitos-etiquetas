@@ -84,14 +84,13 @@ let bancoLeitosERP = [
 ];
 
 // ─── SQL Leitos + Pacientes Internados (BASE validada pelo usuario) ───────
-// Baseado na query real que retorna corretamente os pacientes internados:
-//   tp_atendimento = 'I', dt_alta IS NULL, cd_multi_empresa filtrado.
-// Join extra com previsao_alta (LEFT JOIN) para nao perder nenhum atendimento
-// caso o paciente ainda nao tenha previsao cadastrada.
+// Espelha exatamente a query validada contra o Oracle real (retornou pacientes
+// como LENILDA APARECIDA DE OLIVEIRA, MARIA TEREZINHA ROSA etc.), apenas com
+// ds_leito/ds_resumo adicionados para exibir o numero do leito no painel.
 const SQL_LEITOS = `
 SELECT
     unid_int.cd_unid_int                               AS CD_UNID_INT,
-    unid_int.ds_unid_int                               AS DS_UNID_INT,
+    unid_int.ds_unid_int                                AS DS_UNID_INT,
     atendime.cd_atendimento                            AS CD_ATENDIMENTO,
     atendime.cd_paciente                               AS CD_PACIENTE,
     paciente.nm_paciente                               AS NM_PACIENTE,
@@ -99,14 +98,11 @@ SELECT
     paciente.tp_sexo                                   AS TP_SEXO,
     leito.ds_leito                                     AS DS_LEITO,
     leito.ds_resumo                                    AS DS_RESUMO,
-    TO_CHAR(atendime.dt_entrada, 'DD/MM/YYYY HH24:MI') AS DT_INTERNACAO,
-    TO_CHAR(prev_alta.dt_previsao_alta, 'DD/MM/YYYY')  AS DT_PREVISAO_ALTA,
-    CASE WHEN prev_alta.dt_previsao_alta IS NOT NULL THEN 'SIM' ELSE 'NAO' END AS TEM_PREVISAO_ALTA
+    TO_CHAR(atendime.dt_entrada, 'DD/MM/YYYY HH24:MI') AS DT_INTERNACAO
 FROM dbamv.atendime atendime,
      dbamv.unid_int  unid_int,
      dbamv.leito     leito,
      dbamv.paciente  paciente
-LEFT JOIN dbamv.previsao_alta prev_alta ON prev_alta.cd_atendimento = atendime.cd_atendimento
 WHERE atendime.tp_atendimento = 'I'
   AND atendime.cd_leito = leito.cd_leito
   AND leito.cd_unid_int = unid_int.cd_unid_int
@@ -116,12 +112,35 @@ WHERE atendime.tp_atendimento = 'I'
 ORDER BY atendime.cd_atendimento
 `;
 
+// Consulta separada e OPCIONAL de previsao de alta: roda depois da query
+// principal e por atendimento, para nao quebrar o painel caso a tabela/campo
+// de previsao de alta nao exista ou tenha outro nome no schema deste hospital.
+const SQL_PREVISAO_ALTA = `
+SELECT dt_previsao_alta AS DT_PREVISAO_ALTA
+  FROM dbamv.previsao_alta
+ WHERE cd_atendimento = :cdAtendimento
+`;
+
 async function getConnection() {
   return oracledb.getConnection({
     user: process.env.DB_USER || 'DBAMV',
     password: process.env.DB_PASSWORD,
     connectString: process.env.DB_CONNECT_STRING,
   });
+}
+
+async function buscarPrevisaoAlta(conn, cdAtendimento) {
+  try {
+    const r = await conn.execute(SQL_PREVISAO_ALTA, { cdAtendimento }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    const row = r.rows && r.rows[0];
+    if (!row || !row.DT_PREVISAO_ALTA) return { previsao_alta: null, tem_previsao_alta: false };
+    const dt = new Date(row.DT_PREVISAO_ALTA);
+    const formatada = isNaN(dt) ? null : dt.toLocaleDateString('pt-BR');
+    return { previsao_alta: formatada, tem_previsao_alta: !!formatada };
+  } catch (_err) {
+    // Tabela/campo de previsao de alta pode nao existir neste schema; ignora sem quebrar o painel.
+    return { previsao_alta: null, tem_previsao_alta: false };
+  }
 }
 
 async function getLeitosDoHospital() {
@@ -133,19 +152,25 @@ async function getLeitosDoHospital() {
       { cdMultiEmpresa: CD_MULTI_EMPRESA },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-    return result.rows.map(r => ({
-      id: r.CD_ATENDIMENTO,
-      leito: r.DS_LEITO,
-      setor: r.DS_UNID_INT,
-      nome_paciente: r.NM_PACIENTE,
-      cd_atendimento: r.CD_ATENDIMENTO,
-      cd_paciente: r.CD_PACIENTE,
-      data_nasc: r.DT_NASCIM,
-      sexo: r.TP_SEXO,
-      dt_internacao: r.DT_INTERNACAO,
-      previsao_alta: r.DT_PREVISAO_ALTA || null,
-      tem_previsao_alta: r.TEM_PREVISAO_ALTA === 'SIM',
+
+    const linhas = await Promise.all(result.rows.map(async r => {
+      const alta = await buscarPrevisaoAlta(conn, r.CD_ATENDIMENTO);
+      return {
+        id: r.CD_ATENDIMENTO,
+        leito: r.DS_LEITO || r.DS_RESUMO,
+        setor: r.DS_UNID_INT,
+        nome_paciente: r.NM_PACIENTE,
+        cd_atendimento: r.CD_ATENDIMENTO,
+        cd_paciente: r.CD_PACIENTE,
+        data_nasc: r.DT_NASCIM,
+        sexo: r.TP_SEXO,
+        dt_internacao: r.DT_INTERNACAO,
+        previsao_alta: alta.previsao_alta,
+        tem_previsao_alta: alta.tem_previsao_alta,
+      };
     }));
+
+    return linhas;
   } finally {
     if (conn) try { await conn.close(); } catch (_) {}
   }
