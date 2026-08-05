@@ -11,7 +11,6 @@ const USE_ORACLE = process.env.USE_ORACLE === 'true' || !!process.env.DB_CONNECT
 const CD_MULTI_EMPRESA = process.env.CD_MULTI_EMPRESA || '1';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-// ─── Oracle (Thick Mode, mesmo padrao do mapa-dieta-cmi) ──────────────────
 let oracledb = null;
 if (USE_ORACLE) {
   oracledb = require('oracledb');
@@ -26,50 +25,31 @@ if (USE_ORACLE) {
 }
 
 app.use(express.json());
-
-// Bloqueia acesso a arquivos sensiveis (mesmo padrao do mapa-dieta-cmi)
 app.use((req, res, next) => {
   const bloqueados = ['.env', 'server.js', 'package.json', 'package-lock.json', '.gitignore'];
   if (bloqueados.includes(path.basename(req.path))) return res.status(403).json({ error: 'Acesso negado.' });
   next();
 });
-
 app.use(express.static(PUBLIC_DIR));
 
-// Lista de termos para descartar cadastros ficticios/teste
 const TERMOS_INVALIDOS = [
   'TESTE', 'TREINAMENTO', 'SIMULACAO', 'SIMULAÇÃO', 'DUMMY', 'DEMO',
   'PACIENTE TESTE', 'LEITO VAGO', 'VAGO', 'DESOCUPADO', 'LIVRE',
   'BLOQUEADO', 'MANUTENÇÃO', 'MANUTENCAO', 'HIGIENIZACAO', 'HIGIENIZAÇÃO'
 ];
 
-/**
- * Funcao de validacao: Retorna true apenas para pacientes reais e ativos
- */
 function ePacienteReal(item) {
   if (!item) return false;
-
   const nome = (item.nome_paciente || item.nm_paciente || item.paciente || item.nome || '').trim();
   if (!nome) return false;
-
-  const nomeUpper = nome.toUpperCase();
-  const ehInvalido = TERMOS_INVALIDOS.some(termo => nomeUpper.includes(termo));
-  if (ehInvalido) return false;
-
+  if (TERMOS_INVALIDOS.some(termo => nome.toUpperCase().includes(termo))) return false;
   const atendimento = item.cd_atendimento || item.atendimento_id || item.atendimento || item.prontuario;
-  if (!atendimento || String(atendimento).trim() === '0' || String(atendimento).trim() === '') {
-    return false;
-  }
-
+  if (!atendimento || String(atendimento).trim() === '0' || String(atendimento).trim() === '') return false;
   const dtAlta = item.dt_alta || item.data_alta || item.dataAlta;
-  if (dtAlta && String(dtAlta).trim() !== '') {
-    return false;
-  }
-
+  if (dtAlta && String(dtAlta).trim() !== '') return false;
   return true;
 }
 
-// SIMULACAO DE BANCO DE DADOS / ERP HOSPITALAR (fallback quando Oracle nao esta configurado)
 let bancoLeitosERP = [
   { id: 101, leito: 'UTI-01', setor: 'UTI NEONATAL', nome_paciente: 'HELENA SILVA SANTOS', cd_atendimento: '849201', data_nasc: '2026-07-10', dieta: 'ENTERAL', alergia: 'Lactose', dt_internacao: '2026-07-15 10:30', previsao_alta: '2026-08-07', tem_previsao_alta: true },
   { id: 102, leito: 'UTI-02', setor: 'UTI NEONATAL', nome_paciente: 'ARTHUR OLIVEIRA COSTA', cd_atendimento: '849205', data_nasc: '2026-07-18', dieta: 'ZERO', alergia: 'Nenhuma', dt_internacao: '2026-07-20 14:15', previsao_alta: null, tem_previsao_alta: false },
@@ -83,42 +63,25 @@ let bancoLeitosERP = [
   { id: 401, leito: 'PED-01', setor: 'PEDIATRIA', nome_paciente: 'GABRIEL ENZO ALVES', cd_atendimento: '850401', data_nasc: '2021-05-19', dieta: 'BRANDA', alergia: 'Nenhuma', dt_internacao: '2026-08-01 18:22', previsao_alta: null, tem_previsao_alta: false }
 ];
 
-// ─── SQL Leitos + Pacientes Internados (BASE validada pelo usuario) ───────
-// Espelha exatamente a query validada contra o Oracle real (retornou pacientes
-// como LENILDA APARECIDA DE OLIVEIRA, MARIA TEREZINHA ROSA etc.), apenas com
-// ds_leito/ds_resumo adicionados para exibir o numero do leito no painel.
 const SQL_LEITOS = `
 SELECT
-    unid_int.cd_unid_int                               AS CD_UNID_INT,
-    unid_int.ds_unid_int                                AS DS_UNID_INT,
-    atendime.cd_atendimento                            AS CD_ATENDIMENTO,
-    atendime.cd_paciente                               AS CD_PACIENTE,
-    paciente.nm_paciente                               AS NM_PACIENTE,
-    TO_CHAR(paciente.dt_nascimento, 'DD/MM/YYYY')      AS DT_NASCIM,
-    paciente.tp_sexo                                   AS TP_SEXO,
-    leito.ds_leito                                     AS DS_LEITO,
-    leito.ds_resumo                                    AS DS_RESUMO,
-    TO_CHAR(atendime.dt_entrada, 'DD/MM/YYYY HH24:MI') AS DT_INTERNACAO
-FROM dbamv.atendime atendime,
-     dbamv.unid_int  unid_int,
-     dbamv.leito     leito,
-     dbamv.paciente  paciente
+    unid_int.cd_unid_int AS CD_UNID_INT,
+    unid_int.ds_unid_int AS DS_UNID_INT,
+    atendime.cd_atendimento AS CD_ATENDIMENTO,
+    atendime.cd_paciente AS CD_PACIENTE,
+    paciente.nm_paciente AS NM_PACIENTE
+FROM dbamv.atendime,
+     dbamv.unid_int,
+     dbamv.leito,
+     dbamv.paciente
 WHERE atendime.tp_atendimento = 'I'
   AND atendime.cd_leito = leito.cd_leito
   AND leito.cd_unid_int = unid_int.cd_unid_int
   AND atendime.cd_paciente = paciente.cd_paciente
   AND atendime.dt_alta IS NULL
   AND atendime.cd_multi_empresa IN (:cdMultiEmpresa)
+  AND unid_int.ds_unid_int LIKE '%CMI%'
 ORDER BY atendime.cd_atendimento
-`;
-
-// Consulta separada e OPCIONAL de previsao de alta: roda depois da query
-// principal e por atendimento, para nao quebrar o painel caso a tabela/campo
-// de previsao de alta nao exista ou tenha outro nome no schema deste hospital.
-const SQL_PREVISAO_ALTA = `
-SELECT dt_previsao_alta AS DT_PREVISAO_ALTA
-  FROM dbamv.previsao_alta
- WHERE cd_atendimento = :cdAtendimento
 `;
 
 async function getConnection() {
@@ -127,20 +90,6 @@ async function getConnection() {
     password: process.env.DB_PASSWORD,
     connectString: process.env.DB_CONNECT_STRING,
   });
-}
-
-async function buscarPrevisaoAlta(conn, cdAtendimento) {
-  try {
-    const r = await conn.execute(SQL_PREVISAO_ALTA, { cdAtendimento }, { outFormat: oracledb.OUT_FORMAT_OBJECT });
-    const row = r.rows && r.rows[0];
-    if (!row || !row.DT_PREVISAO_ALTA) return { previsao_alta: null, tem_previsao_alta: false };
-    const dt = new Date(row.DT_PREVISAO_ALTA);
-    const formatada = isNaN(dt) ? null : dt.toLocaleDateString('pt-BR');
-    return { previsao_alta: formatada, tem_previsao_alta: !!formatada };
-  } catch (_err) {
-    // Tabela/campo de previsao de alta pode nao existir neste schema; ignora sem quebrar o painel.
-    return { previsao_alta: null, tem_previsao_alta: false };
-  }
 }
 
 async function getLeitosDoHospital() {
@@ -152,38 +101,29 @@ async function getLeitosDoHospital() {
       { cdMultiEmpresa: CD_MULTI_EMPRESA },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
-
-    const linhas = await Promise.all(result.rows.map(async r => {
-      const alta = await buscarPrevisaoAlta(conn, r.CD_ATENDIMENTO);
-      return {
-        id: r.CD_ATENDIMENTO,
-        leito: r.DS_LEITO || r.DS_RESUMO,
-        setor: r.DS_UNID_INT,
-        nome_paciente: r.NM_PACIENTE,
-        cd_atendimento: r.CD_ATENDIMENTO,
-        cd_paciente: r.CD_PACIENTE,
-        data_nasc: r.DT_NASCIM,
-        sexo: r.TP_SEXO,
-        dt_internacao: r.DT_INTERNACAO,
-        previsao_alta: alta.previsao_alta,
-        tem_previsao_alta: alta.tem_previsao_alta,
-      };
+    return result.rows.map(r => ({
+      id: r.CD_ATENDIMENTO,
+      setor: r.DS_UNID_INT,
+      nome_paciente: r.NM_PACIENTE,
+      cd_atendimento: r.CD_ATENDIMENTO,
+      cd_paciente: r.CD_PACIENTE,
+      cd_unid_int: r.CD_UNID_INT,
+      leito: null,
+      data_nasc: null,
+      sexo: null,
+      dt_internacao: null,
+      previsao_alta: null,
+      tem_previsao_alta: false,
     }));
-
-    return linhas;
   } finally {
     if (conn) try { await conn.close(); } catch (_) {}
   }
 }
 
-// Endpoint em Tempo Real (Retorna todos os leitos ocupados com paciente e previsao de alta)
 app.get('/api/leitos', async (req, res) => {
   try {
     const brutos = USE_ORACLE ? await getLeitosDoHospital() : bancoLeitosERP;
-    const processados = brutos.map(item => ({
-      ...item,
-      eh_real: ePacienteReal(item)
-    }));
+    const processados = brutos.map(item => ({ ...item, eh_real: ePacienteReal(item) }));
     res.json({
       sucesso: true,
       fonte: USE_ORACLE ? 'oracle' : 'json_local',
@@ -205,17 +145,13 @@ app.get('/api/leitos', async (req, res) => {
   }
 });
 
-// Endpoint para Envio de Impressao Direta em ZPL (Termica Zebra)
 app.post('/api/imprimir-zpl', async (req, res) => {
   try {
     const { pacientes, ipImpressora } = req.body;
-
     const pacientesValidos = pacientes.filter(ePacienteReal);
-
     if (pacientesValidos.length === 0) {
       return res.status(400).json({ sucesso: false, mensagem: 'Nenhum paciente real valido para impressao.' });
     }
-
     const resultado = await enviarParaImpressoraZPL(pacientesValidos, ipImpressora);
     res.json({ sucesso: true, mensagem: `Etiquetas enviadas com sucesso! (${pacientesValidos.length})`, resultado });
   } catch (error) {
