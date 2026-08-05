@@ -8,6 +8,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const REFRESH_MINUTES = Number(process.env.REFRESH_MINUTES || 1);
 const USE_ORACLE = process.env.USE_ORACLE === 'true' || !!process.env.DB_CONNECT_STRING;
+const CD_MULTI_EMPRESA = process.env.CD_MULTI_EMPRESA || '1';
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
 // ─── Oracle (Thick Mode, mesmo padrao do mapa-dieta-cmi) ──────────────────
@@ -82,27 +83,37 @@ let bancoLeitosERP = [
   { id: 401, leito: 'PED-01', setor: 'PEDIATRIA', nome_paciente: 'GABRIEL ENZO ALVES', cd_atendimento: '850401', data_nasc: '2021-05-19', dieta: 'BRANDA', alergia: 'Nenhuma', dt_internacao: '2026-08-01 18:22', previsao_alta: null, tem_previsao_alta: false }
 ];
 
-// ─── SQL Leitos + Pacientes + Previsao de Alta (padrao Soul MV / mapa-dieta-cmi) ──
+// ─── SQL Leitos + Pacientes Internados (BASE validada pelo usuario) ───────
+// Baseado na query real que retorna corretamente os pacientes internados:
+//   tp_atendimento = 'I', dt_alta IS NULL, cd_multi_empresa filtrado.
+// Join extra com previsao_alta (LEFT JOIN) para nao perder nenhum atendimento
+// caso o paciente ainda nao tenha previsao cadastrada.
 const SQL_LEITOS = `
 SELECT
+    unid_int.cd_unid_int                               AS CD_UNID_INT,
+    unid_int.ds_unid_int                               AS DS_UNID_INT,
     atendime.cd_atendimento                            AS CD_ATENDIMENTO,
-    paciente.cd_paciente                                AS CD_PACIENTE,
-    paciente.nm_paciente                                AS NM_PACIENTE,
-    TO_CHAR(paciente.dt_nascimento, 'DD/MM/YYYY')       AS DT_NASCIM,
-    paciente.tp_sexo                                    AS TP_SEXO,
-    unid_int.ds_unid_int                                AS DS_UNID_INT,
-    leito.ds_leito                                      AS DS_LEITO,
-    leito.ds_resumo                                     AS DS_RESUMO,
-    TO_CHAR(atendime.dt_entrada, 'DD/MM/YYYY HH24:MI')  AS DT_INTERNACAO,
-    TO_CHAR(prev_alta.dt_previsao_alta, 'DD/MM/YYYY')   AS DT_PREVISAO_ALTA,
+    atendime.cd_paciente                               AS CD_PACIENTE,
+    paciente.nm_paciente                               AS NM_PACIENTE,
+    TO_CHAR(paciente.dt_nascimento, 'DD/MM/YYYY')      AS DT_NASCIM,
+    paciente.tp_sexo                                   AS TP_SEXO,
+    leito.ds_leito                                     AS DS_LEITO,
+    leito.ds_resumo                                    AS DS_RESUMO,
+    TO_CHAR(atendime.dt_entrada, 'DD/MM/YYYY HH24:MI') AS DT_INTERNACAO,
+    TO_CHAR(prev_alta.dt_previsao_alta, 'DD/MM/YYYY')  AS DT_PREVISAO_ALTA,
     CASE WHEN prev_alta.dt_previsao_alta IS NOT NULL THEN 'SIM' ELSE 'NAO' END AS TEM_PREVISAO_ALTA
-FROM dbamv.atendime atendime
-JOIN dbamv.paciente  paciente  ON atendime.cd_paciente = paciente.cd_paciente
-JOIN dbamv.leito     leito     ON atendime.cd_leito     = leito.cd_leito
-JOIN dbamv.unid_int  unid_int  ON leito.cd_unid_int      = unid_int.cd_unid_int
+FROM dbamv.atendime atendime,
+     dbamv.unid_int  unid_int,
+     dbamv.leito     leito,
+     dbamv.paciente  paciente
 LEFT JOIN dbamv.previsao_alta prev_alta ON prev_alta.cd_atendimento = atendime.cd_atendimento
-WHERE atendime.dt_alta IS NULL
-ORDER BY unid_int.ds_unid_int, leito.ds_resumo
+WHERE atendime.tp_atendimento = 'I'
+  AND atendime.cd_leito = leito.cd_leito
+  AND leito.cd_unid_int = unid_int.cd_unid_int
+  AND atendime.cd_paciente = paciente.cd_paciente
+  AND atendime.dt_alta IS NULL
+  AND atendime.cd_multi_empresa IN (:cdMultiEmpresa)
+ORDER BY atendime.cd_atendimento
 `;
 
 async function getConnection() {
@@ -117,13 +128,18 @@ async function getLeitosDoHospital() {
   let conn;
   try {
     conn = await getConnection();
-    const result = await conn.execute(SQL_LEITOS, {}, { outFormat: oracledb.OUT_FORMAT_OBJECT });
+    const result = await conn.execute(
+      SQL_LEITOS,
+      { cdMultiEmpresa: CD_MULTI_EMPRESA },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
     return result.rows.map(r => ({
       id: r.CD_ATENDIMENTO,
       leito: r.DS_LEITO,
       setor: r.DS_UNID_INT,
       nome_paciente: r.NM_PACIENTE,
       cd_atendimento: r.CD_ATENDIMENTO,
+      cd_paciente: r.CD_PACIENTE,
       data_nasc: r.DT_NASCIM,
       sexo: r.TP_SEXO,
       dt_internacao: r.DT_INTERNACAO,
@@ -135,7 +151,7 @@ async function getLeitosDoHospital() {
   }
 }
 
-// Endpoint em Tempo Real (Retorna leitos com status e paciente, incl. previsao de alta)
+// Endpoint em Tempo Real (Retorna todos os leitos ocupados com paciente e previsao de alta)
 app.get('/api/leitos', async (req, res) => {
   try {
     const brutos = USE_ORACLE ? await getLeitosDoHospital() : bancoLeitosERP;
