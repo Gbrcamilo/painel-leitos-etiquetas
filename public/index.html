@@ -29,7 +29,7 @@
                 </div>
                 <div>
                     <h1 class="text-xl font-bold">Painel de Leitos & Etiquetas CMI</h1>
-                    <p class="text-xs text-indigo-300">Tempo Real • Apenas Pacientes Reais Ativos</p>
+                    <p class="text-xs text-indigo-300">Todos os Leitos e Pacientes Internados</p>
                 </div>
             </div>
 
@@ -49,26 +49,22 @@
 
     <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
 
-        <!-- Métricas -->
-        <section class="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <!-- Metricas -->
+        <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                <p class="text-xs font-medium text-gray-500 uppercase">Total Leitos</p>
+                <p class="text-xs font-medium text-gray-500 uppercase">Total de Leitos</p>
                 <h3 id="stat-total" class="text-2xl font-bold text-gray-800">0</h3>
             </div>
             <div class="bg-white p-4 rounded-xl shadow-sm border border-emerald-200">
-                <p class="text-xs font-medium text-emerald-600 uppercase">Pacientes Reais</p>
-                <h3 id="stat-reais" class="text-2xl font-bold text-emerald-700">0</h3>
+                <p class="text-xs font-medium text-emerald-600 uppercase">Leitos Ocupados</p>
+                <h3 id="stat-ocupados" class="text-2xl font-bold text-emerald-700">0</h3>
             </div>
             <div class="bg-white p-4 rounded-xl shadow-sm border border-amber-200">
                 <p class="text-xs font-medium text-amber-600 uppercase">Leitos Vagos</p>
                 <h3 id="stat-vagos" class="text-2xl font-bold text-amber-700">0</h3>
             </div>
-            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                <p class="text-xs font-medium text-gray-500 uppercase">Ignorados (Teste)</p>
-                <h3 id="stat-filtrados" class="text-2xl font-bold text-gray-500">0</h3>
-            </div>
             <div class="bg-white p-4 rounded-xl shadow-sm border border-indigo-200">
-                <p class="text-xs font-medium text-indigo-600 uppercase">Ocupação</p>
+                <p class="text-xs font-medium text-indigo-600 uppercase">Ocupacao</p>
                 <h3 id="stat-taxa" class="text-2xl font-bold text-indigo-700">0%</h3>
             </div>
         </section>
@@ -76,7 +72,7 @@
         <!-- Filtros de Pesquisa -->
         <section class="bg-white p-5 rounded-xl shadow-sm border border-gray-200 space-y-4">
             <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4">
-                <h2 class="text-base font-semibold text-gray-800"><i class="fa-solid fa-sliders text-indigo-600 mr-2"></i>Filtros de Visualização</h2>
+                <h2 class="text-base font-semibold text-gray-800"><i class="fa-solid fa-sliders text-indigo-600 mr-2"></i>Filtros de Visualizacao</h2>
                 <div class="flex gap-2">
                     <button onclick="imprimirNavegador()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-sm">
                         <i class="fa-solid fa-print"></i> Imprimir Selecionados (<span id="count-impressao">0</span>)
@@ -84,47 +80,23 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3 pt-2 border-t border-gray-100">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2 border-t border-gray-100">
                 <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Buscar Paciente / Leito</label>
-                    <input type="text" id="filtro-busca" oninput="aplicarFiltros()" placeholder="Nome, leito..." class="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Buscar Paciente / Leito / Atendimento</label>
+                    <input type="text" id="filtro-busca" oninput="aplicarFiltros()" placeholder="Nome, leito, atendimento..." class="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
                     <label class="block text-xs font-medium text-gray-600 mb-1">Setor</label>
                     <select id="filtro-setor" onchange="aplicarFiltros()" class="w-full py-1.5 px-2.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
                         <option value="TODOS">Todos os Setores</option>
-                        <option value="UTI NEONATAL">UTI Neonatal</option>
-                        <option value="MATERNIDADE">Maternidade</option>
-                        <option value="ENFERMARIA">Enfermaria</option>
-                        <option value="PEDIATRIA">Pediatria</option>
                     </select>
                 </div>
                 <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Status</label>
-                    <select id="filtro-status" onchange="aplicarFiltros()" class="w-full py-1.5 px-2.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
-                        <option value="REAIS">Apenas Pacientes Reais (Ativos)</option>
-                        <option value="TODOS">Todos (Incluir Vagos e Testes)</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Dieta</label>
-                    <select id="filtro-dieta" onchange="aplicarFiltros()" class="w-full py-1.5 px-2.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
-                        <option value="TODOS">Todas as Dietas</option>
-                        <option value="GERAL">Geral</option>
-                        <option value="BRANDA">Branda</option>
-                        <option value="PASTOSA">Pastosa</option>
-                        <option value="LIQUIDA">Líquida</option>
-                        <option value="ZERO">Dieta Zero</option>
-                        <option value="ENTERAL">Enteral</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Atualização Automática</label>
-                    <select id="config-intervalo" onchange="mudarIntervalo()" class="w-full py-1.5 px-2.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
-                        <option value="3000">A cada 3s</option>
-                        <option value="5000" selected>A cada 5s</option>
-                        <option value="10000">A cada 10s</option>
-                        <option value="0">Pausado</option>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Previsao de Alta</label>
+                    <select id="filtro-alta" onchange="aplicarFiltros()" class="w-full py-1.5 px-2.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                        <option value="TODOS">Todos</option>
+                        <option value="COM_PREVISAO">Com previsao de alta</option>
+                        <option value="SEM_PREVISAO">Sem previsao de alta</option>
                     </select>
                 </div>
             </div>
@@ -139,7 +111,6 @@
     <script>
         let dadosBrutos = [];
         let selecionados = new Set();
-        let timerRealTime = null;
 
         async function buscarDadosAPI() {
             try {
@@ -147,32 +118,40 @@
                 const data = await res.json();
                 dadosBrutos = data.dados || [];
                 document.getElementById('label-ultima-atualizacao').innerText = new Date().toLocaleTimeString('pt-BR');
+                atualizarOpcoesSetor();
                 aplicarFiltros();
             } catch (err) {
                 console.error('Erro ao conectar na API:', err);
             }
         }
 
+        function atualizarOpcoesSetor() {
+            const select = document.getElementById('filtro-setor');
+            const atual = select.value;
+            const setores = [...new Set(dadosBrutos.map(x => x.setor).filter(Boolean))].sort();
+            select.innerHTML = '<option value="TODOS">Todos os Setores</option>' +
+                setores.map(s => `<option value="${s}">${s}</option>`).join('');
+            select.value = setores.includes(atual) ? atual : 'TODOS';
+        }
+
         function aplicarFiltros() {
             const busca = document.getElementById('filtro-busca').value.toLowerCase().trim();
             const setor = document.getElementById('filtro-setor').value;
-            const status = document.getElementById('filtro-status').value;
-            const dieta = document.getElementById('filtro-dieta').value;
+            const alta = document.getElementById('filtro-alta').value;
 
-            let totalBruto = dadosBrutos.length;
-            let totalReais = dadosBrutos.filter(x => x.eh_real).length;
-            let totalFiltrados = totalBruto - totalReais;
+            const totalBruto = dadosBrutos.length;
+            const ocupados = dadosBrutos.filter(x => x.eh_real).length;
+            const vagos = totalBruto - ocupados;
 
             document.getElementById('stat-total').innerText = totalBruto;
-            document.getElementById('stat-reais').innerText = totalReais;
-            document.getElementById('stat-vagos').innerText = dadosBrutos.filter(x => (x.nome_paciente||'').includes('VAGO')).length;
-            document.getElementById('stat-filtrados').innerText = totalFiltrados;
-            document.getElementById('stat-taxa').innerText = `${totalBruto > 0 ? ((totalReais/totalBruto)*100).toFixed(1) : 0}%`;
+            document.getElementById('stat-ocupados').innerText = ocupados;
+            document.getElementById('stat-vagos').innerText = vagos;
+            document.getElementById('stat-taxa').innerText = `${totalBruto > 0 ? ((ocupados/totalBruto)*100).toFixed(1) : 0}%`;
 
             const filtrados = dadosBrutos.filter(item => {
-                if (status === 'REAIS' && !item.eh_real) return false;
                 if (setor !== 'TODOS' && item.setor !== setor) return false;
-                if (dieta !== 'TODOS' && (item.dieta || '').toUpperCase() !== dieta) return false;
+                if (alta === 'COM_PREVISAO' && !item.tem_previsao_alta) return false;
+                if (alta === 'SEM_PREVISAO' && item.tem_previsao_alta) return false;
                 if (busca) {
                     const txt = `${item.leito} ${item.nome_paciente} ${item.cd_atendimento}`.toLowerCase();
                     if (!txt.includes(busca)) return false;
@@ -194,23 +173,23 @@
                 <div class="bg-white rounded-xl p-4 border ${item.eh_real ? 'border-indigo-100' : 'border-amber-200 bg-amber-50/40'} shadow-sm space-y-3">
                     <div class="flex justify-between items-center">
                         <div class="flex items-center gap-2">
-                            <input type="checkbox" onchange="toggleSelecao(${item.id})" ${selecionados.has(item.id) ? 'checked' : ''} ${!item.eh_real ? 'disabled' : ''} class="w-4 h-4 text-indigo-600 rounded">
+                            <input type="checkbox" onchange="toggleSelecao(${item.id})" ${selecionados.has(item.id) ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded">
                             <span class="text-xs font-bold px-2 py-1 rounded ${item.eh_real ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-200 text-gray-700'}">${item.leito}</span>
                             <span class="text-[10px] text-gray-500 font-bold">${item.setor}</span>
                         </div>
                         <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${item.eh_real ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
-                            ${item.eh_real ? 'PACIENTE ATIVO' : 'IGNORADO'}
+                            ${item.eh_real ? 'OCUPADO' : 'VAGO'}
                         </span>
                     </div>
                     <div>
-                        <h4 class="text-sm font-bold ${item.eh_real ? 'text-gray-900' : 'text-gray-400 line-through'}">${item.nome_paciente || 'LEITO VAGO'}</h4>
+                        <h4 class="text-sm font-bold ${item.eh_real ? 'text-gray-900' : 'text-gray-400'}">${item.nome_paciente || 'LEITO VAGO'}</h4>
                         ${item.eh_real ? `
                             <div class="grid grid-cols-2 gap-1 text-xs text-gray-600 mt-2">
                                 <div><b>Atend:</b> #${item.cd_atendimento}</div>
-                                <div><b>Dieta:</b> ${item.dieta || 'Geral'}</div>
-                                <div><b>Alergia:</b> ${item.alergia || 'Nenhuma'}</div>
+                                <div><b>Internacao:</b> ${item.dt_internacao || '-'}</div>
+                                <div class="col-span-2"><b>Previsao de Alta:</b> ${item.tem_previsao_alta ? item.previsao_alta : 'Nao informada'}</div>
                             </div>
-                        ` : `<p class="text-xs text-amber-700 mt-1 italic">Registro ocultado das etiquetas pelo filtro CMI.</p>`}
+                        ` : `<p class="text-xs text-amber-700 mt-1 italic">Leito sem paciente ativo.</p>`}
                     </div>
                 </div>
             `).join('');
@@ -224,23 +203,17 @@
             document.getElementById('count-impressao').innerText = selecionados.size;
         }
 
-        function mudarIntervalo() {
-            const ms = parseInt(document.getElementById('config-intervalo').value);
-            if (timerRealTime) clearInterval(timerRealTime);
-            if (ms > 0) timerRealTime = setInterval(buscarDadosAPI, ms);
-        }
-
         function imprimirNavegador() {
             const selecionadosLista = dadosBrutos.filter(x => selecionados.has(x.id) && x.eh_real);
-            if (selecionadosLista.length === 0) return alert('Selecione ao menos um paciente real ativo.');
-            
+            if (selecionadosLista.length === 0) return alert('Selecione ao menos um paciente ativo.');
+
             sessionStorage.setItem('etiquetas_impressao', JSON.stringify(selecionadosLista));
             window.open('imprimir.html', '_blank');
         }
 
         window.onload = () => {
             buscarDadosAPI();
-            mudarIntervalo();
+            setInterval(buscarDadosAPI, 10000);
         };
     </script>
 </body>
