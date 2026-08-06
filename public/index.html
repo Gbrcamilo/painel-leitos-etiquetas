@@ -29,7 +29,7 @@
                 </div>
                 <div>
                     <h1 class="text-xl font-bold">Painel de Leitos & Etiquetas CMI</h1>
-                    <p class="text-xs text-indigo-300">Todos os Leitos e Pacientes Internados</p>
+                    <p class="text-xs text-indigo-300">Pacientes internados nas Unidades CMI (tempo real via Oracle)</p>
                 </div>
             </div>
 
@@ -38,6 +38,9 @@
                 <div class="flex items-center space-x-2">
                     <span id="status-pulse" class="w-3 h-3 bg-green-500 rounded-full pulsing-dot"></span>
                     <span id="status-texto" class="text-xs font-semibold text-green-400">TEMPO REAL ATIVO</span>
+                </div>
+                <div class="text-xs text-gray-300 border-l border-indigo-700 pl-3">
+                    Fonte: <span id="label-fonte" class="font-mono text-indigo-200">--</span>
                 </div>
                 <div class="text-xs text-gray-300 border-l border-indigo-700 pl-3">
                     Sincronizado: <span id="label-ultima-atualizacao" class="font-mono text-indigo-200">--:--:--</span>
@@ -50,22 +53,18 @@
     <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
 
         <!-- Metricas -->
-        <section class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <section class="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-                <p class="text-xs font-medium text-gray-500 uppercase">Total de Leitos</p>
+                <p class="text-xs font-medium text-gray-500 uppercase">Total de Pacientes CMI</p>
                 <h3 id="stat-total" class="text-2xl font-bold text-gray-800">0</h3>
             </div>
             <div class="bg-white p-4 rounded-xl shadow-sm border border-emerald-200">
-                <p class="text-xs font-medium text-emerald-600 uppercase">Leitos Ocupados</p>
+                <p class="text-xs font-medium text-emerald-600 uppercase">Pacientes Reais Exibidos</p>
                 <h3 id="stat-ocupados" class="text-2xl font-bold text-emerald-700">0</h3>
             </div>
-            <div class="bg-white p-4 rounded-xl shadow-sm border border-amber-200">
-                <p class="text-xs font-medium text-amber-600 uppercase">Leitos Vagos</p>
-                <h3 id="stat-vagos" class="text-2xl font-bold text-amber-700">0</h3>
-            </div>
             <div class="bg-white p-4 rounded-xl shadow-sm border border-indigo-200">
-                <p class="text-xs font-medium text-indigo-600 uppercase">Ocupacao</p>
-                <h3 id="stat-taxa" class="text-2xl font-bold text-indigo-700">0%</h3>
+                <p class="text-xs font-medium text-indigo-600 uppercase">Unidades (setores)</p>
+                <h3 id="stat-setores" class="text-2xl font-bold text-indigo-700">0</h3>
             </div>
         </section>
 
@@ -80,29 +79,21 @@
                 </div>
             </div>
 
-            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 pt-2 border-t border-gray-100">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-gray-100">
                 <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Buscar Paciente / Leito / Atendimento</label>
-                    <input type="text" id="filtro-busca" oninput="aplicarFiltros()" placeholder="Nome, leito, atendimento..." class="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Buscar Paciente / Atendimento / Unidade</label>
+                    <input type="text" id="filtro-busca" oninput="aplicarFiltros()" placeholder="Nome, atendimento, unidade..." class="w-full px-3 py-1.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
                 </div>
                 <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Setor</label>
+                    <label class="block text-xs font-medium text-gray-600 mb-1">Unidade (ds_unid_int)</label>
                     <select id="filtro-setor" onchange="aplicarFiltros()" class="w-full py-1.5 px-2.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
-                        <option value="TODOS">Todos os Setores</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-xs font-medium text-gray-600 mb-1">Previsao de Alta</label>
-                    <select id="filtro-alta" onchange="aplicarFiltros()" class="w-full py-1.5 px-2.5 text-xs rounded-lg border border-gray-300 focus:ring-2 focus:ring-indigo-500 outline-none">
-                        <option value="TODOS">Todos</option>
-                        <option value="COM_PREVISAO">Com previsao de alta</option>
-                        <option value="SEM_PREVISAO">Sem previsao de alta</option>
+                        <option value="TODOS">Todas as Unidades</option>
                     </select>
                 </div>
             </div>
         </section>
 
-        <!-- Grid de Leitos -->
+        <!-- Grid de Pacientes -->
         <section>
             <div id="grid-leitos" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"></div>
         </section>
@@ -116,8 +107,9 @@
             try {
                 const res = await fetch('/api/leitos');
                 const data = await res.json();
-                dadosBrutos = data.dados || [];
+                dadosBrutos = (data.dados || []).filter(x => x.eh_real);
                 document.getElementById('label-ultima-atualizacao').innerText = new Date().toLocaleTimeString('pt-BR');
+                document.getElementById('label-fonte').innerText = (data.fonte || '--').toUpperCase();
                 atualizarOpcoesSetor();
                 aplicarFiltros();
             } catch (err) {
@@ -129,7 +121,7 @@
             const select = document.getElementById('filtro-setor');
             const atual = select.value;
             const setores = [...new Set(dadosBrutos.map(x => x.setor).filter(Boolean))].sort();
-            select.innerHTML = '<option value="TODOS">Todos os Setores</option>' +
+            select.innerHTML = '<option value="TODOS">Todas as Unidades</option>' +
                 setores.map(s => `<option value="${s}">${s}</option>`).join('');
             select.value = setores.includes(atual) ? atual : 'TODOS';
         }
@@ -137,23 +129,17 @@
         function aplicarFiltros() {
             const busca = document.getElementById('filtro-busca').value.toLowerCase().trim();
             const setor = document.getElementById('filtro-setor').value;
-            const alta = document.getElementById('filtro-alta').value;
 
-            const totalBruto = dadosBrutos.length;
-            const ocupados = dadosBrutos.filter(x => x.eh_real).length;
-            const vagos = totalBruto - ocupados;
+            const setoresUnicos = new Set(dadosBrutos.map(x => x.setor).filter(Boolean));
 
-            document.getElementById('stat-total').innerText = totalBruto;
-            document.getElementById('stat-ocupados').innerText = ocupados;
-            document.getElementById('stat-vagos').innerText = vagos;
-            document.getElementById('stat-taxa').innerText = `${totalBruto > 0 ? ((ocupados/totalBruto)*100).toFixed(1) : 0}%`;
+            document.getElementById('stat-total').innerText = dadosBrutos.length;
+            document.getElementById('stat-ocupados').innerText = dadosBrutos.length;
+            document.getElementById('stat-setores').innerText = setoresUnicos.size;
 
             const filtrados = dadosBrutos.filter(item => {
                 if (setor !== 'TODOS' && item.setor !== setor) return false;
-                if (alta === 'COM_PREVISAO' && !item.tem_previsao_alta) return false;
-                if (alta === 'SEM_PREVISAO' && item.tem_previsao_alta) return false;
                 if (busca) {
-                    const txt = `${item.leito} ${item.nome_paciente} ${item.cd_atendimento}`.toLowerCase();
+                    const txt = `${item.nome_paciente} ${item.cd_atendimento} ${item.cd_paciente} ${item.setor}`.toLowerCase();
                     if (!txt.includes(busca)) return false;
                 }
                 return true;
@@ -165,31 +151,28 @@
         function renderizarGrid(lista) {
             const container = document.getElementById('grid-leitos');
             if (lista.length === 0) {
-                container.innerHTML = `<div class="col-span-full bg-white p-8 text-center rounded-xl text-gray-500">Nenhum leito encontrado.</div>`;
+                container.innerHTML = `<div class="col-span-full bg-white p-8 text-center rounded-xl text-gray-500">Nenhum paciente encontrado nas Unidades CMI.</div>`;
                 return;
             }
 
             container.innerHTML = lista.map(item => `
-                <div class="bg-white rounded-xl p-4 border ${item.eh_real ? 'border-indigo-100' : 'border-amber-200 bg-amber-50/40'} shadow-sm space-y-3">
+                <div class="bg-white rounded-xl p-4 border border-indigo-100 shadow-sm space-y-3">
                     <div class="flex justify-between items-center">
                         <div class="flex items-center gap-2">
                             <input type="checkbox" onchange="toggleSelecao(${item.id})" ${selecionados.has(item.id) ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded">
-                            <span class="text-xs font-bold px-2 py-1 rounded ${item.eh_real ? 'bg-indigo-100 text-indigo-800' : 'bg-gray-200 text-gray-700'}">${item.leito}</span>
                             <span class="text-[10px] text-gray-500 font-bold">${item.setor}</span>
                         </div>
-                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${item.eh_real ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}">
-                            ${item.eh_real ? 'OCUPADO' : 'VAGO'}
+                        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                            INTERNADO
                         </span>
                     </div>
                     <div>
-                        <h4 class="text-sm font-bold ${item.eh_real ? 'text-gray-900' : 'text-gray-400'}">${item.nome_paciente || 'LEITO VAGO'}</h4>
-                        ${item.eh_real ? `
-                            <div class="grid grid-cols-2 gap-1 text-xs text-gray-600 mt-2">
-                                <div><b>Atend:</b> #${item.cd_atendimento}</div>
-                                <div><b>Internacao:</b> ${item.dt_internacao || '-'}</div>
-                                <div class="col-span-2"><b>Previsao de Alta:</b> ${item.tem_previsao_alta ? item.previsao_alta : 'Nao informada'}</div>
-                            </div>
-                        ` : `<p class="text-xs text-amber-700 mt-1 italic">Leito sem paciente ativo.</p>`}
+                        <h4 class="text-sm font-bold text-gray-900">${item.nome_paciente}</h4>
+                        <div class="grid grid-cols-2 gap-1 text-xs text-gray-600 mt-2">
+                            <div><b>Atend:</b> #${item.cd_atendimento}</div>
+                            <div><b>Cod. Paciente:</b> ${item.cd_paciente}</div>
+                            <div class="col-span-2"><b>Unidade (cd_unid_int):</b> ${item.cd_unid_int}</div>
+                        </div>
                     </div>
                 </div>
             `).join('');
@@ -204,8 +187,8 @@
         }
 
         function imprimirNavegador() {
-            const selecionadosLista = dadosBrutos.filter(x => selecionados.has(x.id) && x.eh_real);
-            if (selecionadosLista.length === 0) return alert('Selecione ao menos um paciente ativo.');
+            const selecionadosLista = dadosBrutos.filter(x => selecionados.has(x.id));
+            if (selecionadosLista.length === 0) return alert('Selecione ao menos um paciente.');
 
             sessionStorage.setItem('etiquetas_impressao', JSON.stringify(selecionadosLista));
             window.open('imprimir.html', '_blank');
