@@ -158,6 +158,12 @@ if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
 app.listen(PORT, () => {
   console.log(`Servidor de Leitos & Etiquetas rodando em http://localhost:${PORT}`);
-  console.log(`Fonte de dados: ${USE_ORACLE ? 'Oracle (DBAMV)' : 'Oracle desativado - configure USE_ORACLE=true e DB_CONNECT_STRING)`);
+  console.log(
+    `Fonte de dados: ${
+      USE_ORACLE
+        ? 'Oracle (DBAMV)'
+        : 'Oracle desativado - configure USE_ORACLE=true e DB_CONNECT_STRING'
+    }`
+  );
   console.log(`Refresh automatico sugerido no painel: ${REFRESH_MINUTES} min`);
 });
