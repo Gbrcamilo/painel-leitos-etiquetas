@@ -50,18 +50,7 @@ function ePacienteReal(item) {
   return true;
 }
 
-let bancoLeitosERP = [
-  { id: 101, leito: 'UTI-01', setor: 'UTI NEONATAL', nome_paciente: 'HELENA SILVA SANTOS', cd_atendimento: '849201', data_nasc: '2026-07-10', dieta: 'ENTERAL', alergia: 'Lactose', dt_internacao: '2026-07-15 10:30', previsao_alta: '2026-08-07', tem_previsao_alta: true },
-  { id: 102, leito: 'UTI-02', setor: 'UTI NEONATAL', nome_paciente: 'ARTHUR OLIVEIRA COSTA', cd_atendimento: '849205', data_nasc: '2026-07-18', dieta: 'ZERO', alergia: 'Nenhuma', dt_internacao: '2026-07-20 14:15', previsao_alta: null, tem_previsao_alta: false },
-  { id: 103, leito: 'UTI-03', setor: 'UTI NEONATAL', nome_paciente: 'PACIENTE TESTE TREINAMENTO', cd_atendimento: '999999', data_nasc: '2020-01-01', dieta: 'GERAL' },
-  { id: 104, leito: 'UTI-04', setor: 'UTI NEONATAL', nome_paciente: 'LEITO VAGO', cd_atendimento: '0' },
-  { id: 201, leito: 'MAT-101', setor: 'MATERNIDADE', nome_paciente: 'MARIA EDUARDA PEREIRA', cd_atendimento: '850112', data_nasc: '1998-04-12', dieta: 'GERAL', alergia: 'Dipirona', dt_internacao: '2026-08-02 11:20', previsao_alta: '2026-08-06', tem_previsao_alta: true },
-  { id: 202, leito: 'MAT-102', setor: 'MATERNIDADE', nome_paciente: 'BEATRIZ FERREIRA LIMA', cd_atendimento: '850115', data_nasc: '1995-11-23', dieta: 'BRANDA', alergia: 'Penicilina', dt_internacao: '2026-08-02 16:40', previsao_alta: null, tem_previsao_alta: false },
-  { id: 203, leito: 'MAT-103', setor: 'MATERNIDADE', nome_paciente: 'SIMULACAO SISTEMA CMI', cd_atendimento: '88888' },
-  { id: 301, leito: 'ENF-201-A', setor: 'ENFERMARIA', nome_paciente: 'JOAO GABRIEL RODRIGUES', cd_atendimento: '847330', data_nasc: '1972-03-15', dieta: 'PASTOSA', alergia: 'Nenhuma', dt_internacao: '2026-07-28 09:10', previsao_alta: '2026-08-05', tem_previsao_alta: true },
-  { id: 302, leito: 'ENF-201-B', setor: 'ENFERMARIA', nome_paciente: 'CARLOS ALBERTO SOUZA', cd_atendimento: '847335', data_nasc: '1965-09-08', dieta: 'LIQUIDA', alergia: 'AAS', dt_internacao: '2026-07-29 15:00', previsao_alta: null, tem_previsao_alta: false },
-  { id: 401, leito: 'PED-01', setor: 'PEDIATRIA', nome_paciente: 'GABRIEL ENZO ALVES', cd_atendimento: '850401', data_nasc: '2021-05-19', dieta: 'BRANDA', alergia: 'Nenhuma', dt_internacao: '2026-08-01 18:22', previsao_alta: null, tem_previsao_alta: false }
-];
+// REMOVIDO: bancoLeitosERP com pacientes fixos. A fonte agora é sempre Oracle quando configurado corretamente.
 
 const SQL_LEITOS = `
 SELECT
@@ -122,25 +111,31 @@ async function getLeitosDoHospital() {
 
 app.get('/api/leitos', async (req, res) => {
   try {
-    const brutos = USE_ORACLE ? await getLeitosDoHospital() : bancoLeitosERP;
+    if (!USE_ORACLE) {
+      return res.status(500).json({
+        sucesso: false,
+        mensagem: 'USE_ORACLE precisa estar como true e DB_CONNECT_STRING configurado para usar pacientes reais.',
+      });
+    }
+
+    const brutos = await getLeitosDoHospital();
     const processados = brutos.map(item => ({ ...item, eh_real: ePacienteReal(item) }));
+
     res.json({
       sucesso: true,
-      fonte: USE_ORACLE ? 'oracle' : 'json_local',
+      fonte: 'oracle',
       timestamp: new Date().toISOString(),
       total_bruto: processados.length,
-      dados: processados
+      dados: processados,
     });
   } catch (error) {
-    console.error('[/api/leitos] Falha ao consultar Oracle, usando fallback local:', error.message);
-    const processados = bancoLeitosERP.map(item => ({ ...item, eh_real: ePacienteReal(item) }));
-    res.json({
-      sucesso: true,
-      fonte: 'json_local_fallback',
+    console.error('[/api/leitos] Falha ao consultar Oracle:', error.message);
+    res.status(500).json({
+      sucesso: false,
+      fonte: 'oracle',
       erro_oracle: error.message,
       timestamp: new Date().toISOString(),
-      total_bruto: processados.length,
-      dados: processados
+      dados: [],
     });
   }
 });
@@ -163,6 +158,6 @@ if (!fs.existsSync(PUBLIC_DIR)) fs.mkdirSync(PUBLIC_DIR, { recursive: true });
 
 app.listen(PORT, () => {
   console.log(`Servidor de Leitos & Etiquetas rodando em http://localhost:${PORT}`);
-  console.log(`Fonte de dados: ${USE_ORACLE ? 'Oracle (DBAMV)' : 'JSON local (fallback)'}`);
+  console.log(`Fonte de dados: ${USE_ORACLE ? 'Oracle (DBAMV)' : 'Oracle desativado - configure USE_ORACLE=true e DB_CONNECT_STRING)`);
   console.log(`Refresh automatico sugerido no painel: ${REFRESH_MINUTES} min`);
 });
